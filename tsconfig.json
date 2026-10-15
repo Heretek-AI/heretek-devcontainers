@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["bun"],
+    "outDir": "dist",
+    "rootDir": ".",
+    "erasableSyntaxOnly": false
+  },
+  "include": ["scripts/**/*.ts", "test/**/*.ts"]
+}

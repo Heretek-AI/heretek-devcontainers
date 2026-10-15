@@ -1,0 +1,16 @@
+{
+  "name": "heretek-devcontainers",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Heretek AI infrastructure layer: 5 compose profiles, 3 devcontainer templates, systemd quadlets, heretek-box-ctl CLI and static verifier.",
+  "scripts": {
+    "test": "bun test",
+    "verify": "bun run scripts/verify-stack.ts",
+    "check": "make check"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/bun": "^1.1.10"
+  }
+}
