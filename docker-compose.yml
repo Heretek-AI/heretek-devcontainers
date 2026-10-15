@@ -1,0 +1,14 @@
+# docker-compose.yml — Heretek devcontainers root orchestrator (Wave 1)
+#
+# Minimal root: it only declares `include:` for the modular profiles.
+# Services live in compose/*.yml. The `core` profile always loads;
+# specialist profiles (appsec/android/game/research, Wave 2) activate
+# on demand via `docker compose --profile <name> up`.
+name: heretek-devcontainers
+
+include:
+  - compose/core.yml
+  - compose/profile-appsec.yml
+  - compose/profile-android.yml
+  - compose/profile-game.yml
+  - compose/profile-research.yml

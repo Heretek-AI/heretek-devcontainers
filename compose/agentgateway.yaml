@@ -1,0 +1,63 @@
+# compose/agentgateway.yaml — AgentGateway CEL RBAC + MCP target routing (Wave 1)
+#
+# Two roles: `admin` (full access) and `agent` (limited to MCP invoke/list
+# on explicitly bound targets). Targets resolve over the compose network
+# via service DNS; host loopback mappings are 127.0.0.1:8080 (bifrost),
+# 127.0.0.1:3000 (this gateway), 127.0.0.1:4222/8222 (nats) per compose/core.yml.
+# Mounted read-only into the `agentgateway` service (see compose/core.yml).
+version: v1
+
+listeners:
+  - name: ingress
+    address: ":3000"
+    health_path: /healthz
+
+authentication:
+  session_header: x-session-id
+  token_env: AGENTGATEWAY_TOKEN
+
+roles:
+  - name: admin
+    description: Full access for operators.
+    rules:
+      - effect: allow
+        actions: ["*"]
+        resources: ["*"]
+        condition: request.auth.claims.role == "admin"
+  - name: agent
+    description: Limited MCP invoke/list for workload agents.
+    rules:
+      - effect: allow
+        actions: ["mcp.invoke", "mcp.list"]
+        resources:
+          - bifrost/default-llm
+          - nats/jetstream
+        condition: request.auth.claims.role == "agent"
+      - effect: deny
+        actions: ["admin.*", "mcp.delete", "route.*"]
+        resources: ["*"]
+        condition: request.auth.claims.role == "agent"
+
+targets:
+  bifrost:
+    description: Bifrost 3-tier LLM gateway (default-llm route).
+    endpoint: http://bifrost:8080
+    protocol: http
+  nats:
+    description: Core NATS JetStream message bus.
+    endpoint: nats://nats:4222
+    protocol: nats
+
+routes:
+  - name: llm-default
+    path_prefix: /bifrost/
+    target: bifrost
+    allowed_roles: ["admin", "agent"]
+  - name: bus-events
+    path_prefix: /events/
+    target: nats
+    allowed_roles: ["admin", "agent"]
+  - name: admin-only
+    path_prefix: /admin/
+    target: bifrost
+    allowed_roles: ["admin"]

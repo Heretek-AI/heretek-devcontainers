@@ -1,0 +1,49 @@
+# compose/bifrost.yaml — Bifrost 3-tier LLM failover config (Wave 1, from Report 01b §3.1)
+#
+# Tier order: opencode (local Go harness) -> openrouter (cloud) -> local-vllm (on-box).
+# Session affinity pins a session id to one provider for cache warmth.
+# Mounted read-only into the `bifrost` service as /app/config.yaml (see compose/core.yml).
+version: "1"
+
+server:
+  # Port-only listen form; the container port is published to the host
+  # loopback (127.0.0.1:8080) by compose/core.yml.
+  listen: ":8080"
+  health_path: /healthz
+
+session_affinity:
+  enabled: true
+  ttl: "3600s"
+  header: "x-session-id"
+
+providers:
+  opencode:
+    kind: opencode-go
+    base_url: http://host.docker.internal:11434/v1
+    api_key: ${BIFROST_API_KEY}
+    models:
+      - default
+  openrouter:
+    kind: openrouter
+    base_url: https://openrouter.ai/api/v1
+    api_key: ${OPENROUTER_API_KEY}
+    models:
+      - anthropic/claude-default
+      - openai/gpt-default
+  local-vllm:
+    kind: openai-compatible
+    base_url: http://host.docker.internal:8000/v1
+    api_key: local-only-no-secret
+    models:
+      - hosted-llm
+
+routes:
+  - name: default-llm
+    primary: opencode
+    fallbacks:
+      - openrouter
+      - local-vllm
+
+retry:
+  parse_retry_after: true
+  max_retry_after_clamp: "300s"

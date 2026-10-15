@@ -1,0 +1,74 @@
+# compose/core.yml — `core` profile: LLM gateway, agent gateway, message bus (Wave 1)
+#
+# Always-loaded foundation. Every service is hardened fail-closed:
+# pinned image, 127.0.0.1 loopback ports only, cap_drop ALL,
+# no-new-privileges, :Z SELinux volume labels, non-root user, zero socket mounts.
+name: heretek-core
+
+services:
+  bifrost:
+    image: ghcr.io/maximhq/bifrost:v1.0.0
+    user: "1000:1000"
+    restart: unless-stopped
+    command: ["-config", "/app/config.yaml"]
+    environment:
+      BIFROST_API_KEY: ${BIFROST_API_KEY:?BIFROST_API_KEY is required}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?OPENROUTER_API_KEY is required}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./bifrost.yaml:/app/config.yaml:ro,Z
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  agentgateway:
+    image: ghcr.io/agentgateway/agentgateway:v1.6.0
+    user: "1000:1000"
+    restart: unless-stopped
+    command: ["serve", "--config", "/etc/agentgateway.yaml"]
+    depends_on:
+      bifrost:
+        condition: service_started
+      nats:
+        condition: service_started
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./agentgateway.yaml:/etc/agentgateway.yaml:ro,Z
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  nats:
+    image: nats:2.15.1-alpine
+    user: "1000:1000"
+    restart: unless-stopped
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    volumes:
+      - nats-data:/data
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/varz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  nats-data:
+    driver: local
