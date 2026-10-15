@@ -1,0 +1,140 @@
+# Wave 1 QA Red-Proof Evidence Log
+# Branch: wave-1-core-verifier
+# Worktree: /home/john/Projects/Heretek-AI-Rebuild/heretek-devcontainers/worktrees/wave-1
+# Date (UTC): 2026-10-15T21:50:42Z
+# QA Agent: agency-qa (QA Verifier)
+# Spec sources read in full from disk: AGENTS.md, docs/prompts/SPEC.md, docs/prompts/verify-stage.md, docs/reports/wave-1.md
+
+## GREEN PATH — all exits 0 on clean tree
+
+### 1. make check (EXIT_MAKE_CHECK=0)
+```
+==> bun run scripts/verify-stack.ts
+PASS: all security contracts hold across 4 scanned file(s).
+==> bun test
+bun test v1.4.2 (744846f84)
+
+ 14 pass
+ 0 fail
+ 66 expect() calls
+Ran 14 tests across 2 files. [10.00ms]
+EXIT_MAKE_CHECK=0
+```
+NOTE: wave-1.md self-reports 13 tests; actual tree has 14 tests green (superset, not a failure).
+
+### 2. bash scripts/accept/wave-1.sh (EXIT_ACCEPT=0)
+```
+==> [wave-1] required files exist
+  ok: .env.example
+  ok: docker-compose.yml
+  ok: compose/core.yml
+  ok: compose/bifrost.yaml
+  ok: compose/agentgateway.yaml
+  ok: scripts/verify-stack.ts
+  ok: test/compose-contracts.test.ts
+  ok: test/bifrost-config.test.ts
+==> [wave-1] .env.example carries CHANGEME_ template tokens
+==> [wave-1] root compose uses include:
+==> [wave-1] core.yml defines 3 pinned services
+==> [wave-1] bifrost.yaml configures session affinity
+==> [wave-1] static verifier passes (fail-closed)
+PASS: all security contracts hold across 4 scanned file(s).
+==> [wave-1] unit tests pass
+bun test v1.4.2 (744846f84)
+
+ 14 pass
+ 0 fail
+ 66 expect() calls
+Ran 14 tests across 2 files. [16.00ms]
+WAVE-1 ACCEPT PASS
+EXIT_ACCEPT=0
+```
+
+### 3. bun test standalone (EXIT_BUNTEST=0)
+```
+bun test v1.4.2 (744846f84)
+
+ 14 pass
+ 0 fail
+ 66 expect() calls
+Ran 14 tests across 2 files. [10.00ms]
+EXIT_BUNTEST=0
+```
+
+### 4. bun run scripts/verify-stack.ts standalone (EXIT_VERIFY=0)
+```
+PASS: all security contracts hold across 4 scanned file(s).
+EXIT_VERIFY=0
+```
+
+---
+
+## Sabotage 1 (NO_FLOATING_TAGS) — 2026-10-15 UTC
+COMMAND: sed -i 's/nats:2.15.1-alpine/nats:latest/' compose/core.yml
+MUTATION: compose/core.yml line 54: `    image: nats:2.15.1-alpine` -> `    image: nats:latest`
+  (native `edit` tool returned `Permission denied: edit` for this path; fell back to
+   QA-only `sed` sabotage explicitly authorized by docs/prompts/verify-stage.md §1.2 NOTE.
+   File bytes otherwise preserved; only the single image tag mutated, confirmed via
+   `grep -n "image:" compose/core.yml` showing `54:     image: nats:latest`.)
+OBSERVED:
+```
+FAIL [NO_FLOATING_TAGS] compose/core.yml:54: floating/empty image tag forbidden: nats:latest
+verify-stack: 1 violation(s) in 4 file(s) — FAIL CLOSED
+exit=1
+```
+RESULT: PASS — verifier failed closed with correct rule NO_FLOATING_TAGS, exit 1.
+RESTORED: git checkout -- compose/core.yml (RESTORE_EXIT=0)
+  git status --short after restore: clean (no output; sabotaged file absent).
+  grep confirms `54:     image: nats:2.15.1-alpine` restored.
+  Re-run verifier: `PASS: all security contracts hold across 4 scanned file(s).` exit 0 (EXIT_VERIFY_CLEAN1=0).
+
+## Sabotage 2 (LOOPBACK_PORTS_ONLY) — 2026-10-15 UTC
+COMMAND: sed -i 's/127.0.0.1:8080:8080/0.0.0.0:8080:8080/' compose/core.yml
+MUTATION: compose/core.yml line 18: `      - "127.0.0.1:8080:8080"` -> `      - "0.0.0.0:8080:8080"` (bifrost service)
+OBSERVED:
+```
+FAIL [LOOPBACK_PORTS_ONLY] compose/core.yml:18: service "bifrost" port must bind 127.0.0.1:<host>:<container>, got: 0.0.0.0:8080:8080
+verify-stack: 1 violation(s) in 4 file(s) — FAIL CLOSED
+exit=1
+```
+RESULT: PASS — verifier failed closed with correct rule LOOPBACK_PORTS_ONLY, exit 1.
+RESTORED: git checkout -- compose/core.yml (RESTORE_EXIT=0)
+  git status --short after restore: clean (no output).
+  Re-run verifier: `PASS: all security contracts hold across 4 scanned file(s).` exit 0 (EXIT_VERIFY_CLEAN2=0).
+
+## Sabotage 3 (NO_DOCKER_SOCK, optional) — 2026-10-15 UTC
+COMMAND: python3 insert under nats volumes: `      - /var/run/docker.sock:/var/run/docker.sock` after `      - nats-data:/data`
+MUTATION: compose/core.yml line 63 added: `      - /var/run/docker.sock:/var/run/docker.sock` (nats service)
+OBSERVED:
+```
+FAIL [NO_DOCKER_SOCK] compose/core.yml:63: socket mount reference forbidden: - /var/run/docker.sock:/var/run/docker.sock
+FAIL [SELINUX_VOLUME_LABELS] compose/core.yml:63: service "nats" bind mount missing :z/:Z/:ro,Z SELinux label: /var/run/docker.sock:/var/run/docker.sock
+verify-stack: 2 violation(s) in 4 file(s) — FAIL CLOSED
+exit=1
+```
+RESULT: PASS — verifier failed closed with correct primary rule NO_DOCKER_SOCK (plus secondary SELINUX_VOLUME_LABELS on same line), exit 1.
+RESTORED: git checkout -- compose/core.yml (RESTORE_EXIT=0)
+  git status --short after restore: clean (no output).
+  Re-run verifier: `PASS: all security contracts hold across 4 scanned file(s).` exit 0 (EXIT_VERIFY_CLEAN3=0).
+
+---
+
+## ZERO-STUBS AUDIT
+- grep `TODO|FIXME|placeholder|dummy` in compose/: No matches found. CLEAN.
+- grep `TODO|FIXME|placeholder|dummy|return true` in scripts/verify-stack.ts: 2 matches, both legitimate rule logic (not stubs):
+  - Line 24 comment: `.env (placeholder check only).` — doc comment for ENV_PLACEHOLDER_LEAK scope.
+  - Line 411: `fail(..., "ENV_PLACEHOLDER_LEAK", "real .env still contains a CHANGEME_ placeholder token")` — active fail-closed enforcement, not a stub.
+- grep `TODO|FIXME|placeholder|dummy|expect(true)` in test/: No matches found. CLEAN (no vacuous `expect(true)`).
+VERDICT: ZERO STUBS — PASS.
+
+---
+
+## FINAL TREE STATE
+- `git branch --show-current`: wave-1-core-verifier
+- `git status --short`: clean (only this untracked evidence file docs/evidence/wave-1/red-proofs.log pending coordinator review; no code/test modifications).
+- Verifier on final tree: PASS exit 0.
+- No commits made, no pushes made (per QA constraints).
+
+## QA VERDICT: PASS
+All green-path checks exit 0 (make check, accept wave-1.sh, bun test 14/14, verifier PASS).
+All 3 sabotages exit 1 with correct rules (NO_FLOATING_TAGS, LOOPBACK_PORTS_ONLY, NO_DOCKER_SOCK) and were cleanly restored via `git checkout --` with verifier back to 0 and tree clean.

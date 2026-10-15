@@ -2,3 +2,6 @@ node_modules/
 worktrees/
 .env
 *.log
+
+# Preserve triad red-proof evidence (binding gate)
+!docs/evidence/**/*.log
