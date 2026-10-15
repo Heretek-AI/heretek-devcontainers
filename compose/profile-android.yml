@@ -1,0 +1,88 @@
+# compose/profile-android.yml — `android` on-demand domain profile (Wave 2)
+#
+# KVM emulator + ADB/Maestro MCP bridges. Activated on demand via:
+#   docker compose --profile android up
+# (or `--profile all` for everything). Every service is hardened fail-closed:
+# pinned image, 127.0.0.1 loopback ports only, cap_drop ALL,
+# no-new-privileges, non-root user, zero socket mounts.
+#
+# `android-kvm` passes through /dev/kvm via `devices:` (a device mapping,
+# not a volume mount — no SELinux label rule applies to it).
+services:
+  android-kvm:
+    image: budtmo/docker-android:emulator_14.0
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["android", "all"]
+    devices:
+      - "/dev/kvm:/dev/kvm"
+    ports:
+      - "127.0.0.1:6080:6080"
+      - "127.0.0.1:5555:5555"
+    volumes:
+      - android-data:/data
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:6080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  adb-mcp:
+    image: ghcr.io/iksnerd/adb-mcp:v1.4.0
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["android", "all"]
+    depends_on:
+      android-kvm:
+        condition: service_started
+    environment:
+      ANDROID_HOST: android-kvm
+      ADB_PORT: "5555"
+    ports:
+      - "127.0.0.1:8770:8770"
+    volumes:
+      - adb-mcp-data:/data
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8770/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  maestro-mcp:
+    image: ghcr.io/mobile-dev-inc/maestro:v1.39.8
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["android", "all"]
+    depends_on:
+      android-kvm:
+        condition: service_started
+    command: ["maestro", "mcp"]
+    environment:
+      ANDROID_HOST: android-kvm
+      ADB_PORT: "5555"
+    ports:
+      - "127.0.0.1:8771:8771"
+    volumes:
+      - maestro-data:/data
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8771/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  android-data:
+    driver: local
+  adb-mcp-data:
+    driver: local
+  maestro-data:
+    driver: local

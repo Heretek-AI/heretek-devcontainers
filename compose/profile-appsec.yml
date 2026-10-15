@@ -1,0 +1,98 @@
+# compose/profile-appsec.yml — `appsec` on-demand domain profile (Wave 2)
+#
+# Reverse-engineering / binary-analysis MCP servers. Activated on demand via:
+#   docker compose --profile appsec up
+# (or `--profile all` for everything). Every service is hardened fail-closed:
+# pinned image, 127.0.0.1 loopback ports only, cap_drop ALL,
+# no-new-privileges, :Z SELinux bind labels, non-root user, zero socket mounts.
+#
+# NOTE: `mdb-mcp` carries the SOLE documented capability exception in this
+# repo — a narrow SYS_PTRACE grant required for debugger attachment.
+# It still drops all other capabilities and keeps no-new-privileges.
+services:
+  ghidra-mcp:
+    image: bethington/ghidra-mcp-headless:v6.0.0
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["appsec", "all"]
+    environment:
+      GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:?GHIDRA_MCP_AUTH_TOKEN is mandatory}
+    ports:
+      - "127.0.0.1:8089:8089"
+    volumes:
+      - ./data/ghidra-mcp:/data:Z
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8089/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  radare2-mcp:
+    image: ghcr.io/radareorg/radare2-mcp:1.8.8
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["appsec", "all"]
+    # Container-internal listen address (NOT a published host port — the
+    # published port below is loopback-only). `-r` forces read-only mode.
+    command: ["r2mcp", "-H", "0.0.0.0:8765", "-r"]
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - radare2-data:/data
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8765/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  rea-mcp:
+    image: ghcr.io/morluto/rea:6.5.0
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["appsec", "all"]
+    ports:
+      - "127.0.0.1:8766:8766"
+    volumes:
+      - rea-data:/data
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8766/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  mdb-mcp:
+    image: ghcr.io/smadi0x86/mdb-mcp:1.2.0
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["appsec", "all"]
+    ports:
+      - "127.0.0.1:8767:8767"
+    volumes:
+      - mdb-data:/data
+    cap_drop: [ALL]
+    # SOLE documented exception: narrow SYS_PTRACE for debugger attachment.
+    cap_add: [SYS_PTRACE]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8767/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  radare2-data:
+    driver: local
+  rea-data:
+    driver: local
+  mdb-data:
+    driver: local

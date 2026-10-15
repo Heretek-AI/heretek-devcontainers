@@ -1,0 +1,79 @@
+# compose/profile-research.yml — `research` on-demand domain profile (Wave 2)
+#
+# SearXNG (isolated behind HTTP JSON REST) + Crawl4AI (Apache-2.0, non-AGPL
+# scraping core) + headless Sway/AT-SPI2 computer-use MCP server.
+# Activated on demand via:
+#   docker compose --profile research up
+# (or `--profile all` for everything). Every service is hardened fail-closed:
+# pinned image, 127.0.0.1 loopback ports only, cap_drop ALL,
+# no-new-privileges, non-root user, zero socket mounts.
+services:
+  searxng:
+    image: searxng/searxng:2026.10.14
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["research", "all"]
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?SEARXNG_SECRET is required}
+      BASE_URL: http://127.0.0.1:8888/
+    ports:
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - searxng-config:/etc/searxng
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  crawl4ai:
+    image: unclecode/crawl4ai:0.9.5
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["research", "all"]
+    shm_size: "1g"
+    ports:
+      - "127.0.0.1:11235:11235"
+    volumes:
+      - crawl4ai-data:/data
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:11235/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  computer-use-linux:
+    image: ghcr.io/agent-sh/computer-use-linux:v0.9.4
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["research", "all"]
+    # Headless Sway + AT-SPI2 accessibility tree (no GPU / no display).
+    environment:
+      WLR_BACKENDS: headless
+      SWAY_HEADLESS: "1"
+    ports:
+      - "127.0.0.1:8790:8790"
+    volumes:
+      - computer-use-data:/data
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8790/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  searxng-config:
+    driver: local
+  crawl4ai-data:
+    driver: local
+  computer-use-data:
+    driver: local

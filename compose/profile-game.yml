@@ -1,0 +1,55 @@
+# compose/profile-game.yml — `game` on-demand domain profile (Wave 2)
+#
+# Headless Godot 4.3 + Blender FastMCP 3.2 MCP servers. Activated on demand via:
+#   docker compose --profile game up
+# (or `--profile all` for everything). Every service is hardened fail-closed:
+# pinned image, 127.0.0.1 loopback ports only, cap_drop ALL,
+# no-new-privileges, non-root user, zero socket mounts.
+services:
+  godot-mcp:
+    image: ghcr.io/tugcantopaloglu/godot-mcp:v3.1.0
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["game", "all"]
+    environment:
+      GODOT_HEADLESS: "1"
+    ports:
+      - "127.0.0.1:8780:8780"
+    volumes:
+      - godot-projects:/projects
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8780/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  blender-mcp:
+    image: ghcr.io/sandraschi/blender-mcp:v1.2.0
+    user: "1000:1000"
+    restart: unless-stopped
+    profiles: ["game", "all"]
+    # Headless Blender background mode serving the FastMCP 3.2 bridge.
+    command: ["blender", "--background"]
+    environment:
+      BLENDER_HEADLESS: "1"
+    ports:
+      - "127.0.0.1:8781:8781"
+    volumes:
+      - blender-data:/data
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8781/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  godot-projects:
+    driver: local
+  blender-data:
+    driver: local
