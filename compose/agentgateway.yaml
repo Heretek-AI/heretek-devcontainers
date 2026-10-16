@@ -1,63 +1,273 @@
-# compose/agentgateway.yaml — AgentGateway CEL RBAC + MCP target routing (Wave 1)
+# compose/agentgateway.yaml — AgentGateway v1.6.0 standalone config: API-key
+# roles, MCP target routing, and the LLM route.
 #
-# Two roles: `admin` (full access) and `agent` (limited to MCP invoke/list
-# on explicitly bound targets). Targets resolve over the compose network
-# via service DNS; host loopback mappings are 127.0.0.1:8080 (bifrost),
-# 127.0.0.1:3000 (this gateway), 127.0.0.1:4222/8222 (nats) per compose/core.yml.
-# Mounted read-only into the `agentgateway` service (see compose/core.yml).
-version: v1
+# Schema: https://agentgateway.dev/schema/config (binds -> listeners -> routes
+# -> backends). Validate with `make validate-gateway`, which runs the real
+# agentgateway binary with --validate-only.
+#
+# Mounted read-only into the `agentgateway` service (compose/core.yml), which
+# runs `agentgateway -f /etc/agentgateway.yaml` and publishes 127.0.0.1:3000
+# (the heretek-context-router default HERETEK_GATEWAY_URL).
+#
+# Routing contract (heretek-context-router `per-target` mode): one route per
+# MCP target at path prefix /mcp/<target>, each holding exactly ONE target of
+# the same name, so agentgateway forwards tool names unprefixed. Target names
+# never contain `_` (agentgateway joins target and tool with `_`). Each target
+# is the compose service labelled `heretek.mcp.target: <target>` in
+# compose/profile-*.yml, reached by service DNS name and CONTAINER port
+# (enforced by test/agentgateway-config.test.ts). Targets in a profile that is
+# not running are simply unreachable.
+#
+# Not routed yet: `core` (no heretek-core MCP service exists in this repo) and
+# `searxng` (SearXNG serves an HTTP JSON search API, not MCP).
+#
+# Roles: every request must carry `Authorization: Bearer <key>` matching
+# AGENTGATEWAY_ADMIN_KEY (role `admin`) or AGENTGATEWAY_AGENT_KEY (role
+# `agent`). agentgateway refuses to start if either variable is unset.
+#   admin — every route.
+#   agent — every route except the two targets that can drive processes or
+#           the desktop (`mdb` debugger, `gui` computer-use-linux), which carry
+#           an admin-only mcpAuthorization rule.
 
-listeners:
+config:
+  # The compose network is IPv4-only; binding [::] also fails outright on
+  # hosts booted with ipv6.disable=1.
+  enableIpv6: false
+
+binds:
+- port: 3000
+  listeners:
   - name: ingress
-    address: ":3000"
-    health_path: /healthz
-
-authentication:
-  session_header: x-session-id
-  token_env: AGENTGATEWAY_TOKEN
-
-roles:
-  - name: admin
-    description: Full access for operators.
-    rules:
-      - effect: allow
-        actions: ["*"]
-        resources: ["*"]
-        condition: request.auth.claims.role == "admin"
-  - name: agent
-    description: Limited MCP invoke/list for workload agents.
-    rules:
-      - effect: allow
-        actions: ["mcp.invoke", "mcp.list"]
-        resources:
-          - bifrost/default-llm
-          - nats/jetstream
-        condition: request.auth.claims.role == "agent"
-      - effect: deny
-        actions: ["admin.*", "mcp.delete", "route.*"]
-        resources: ["*"]
-        condition: request.auth.claims.role == "agent"
-
-targets:
-  bifrost:
-    description: Bifrost 3-tier LLM gateway (default-llm route).
-    endpoint: http://bifrost:8080
-    protocol: http
-  nats:
-    description: Core NATS JetStream message bus.
-    endpoint: nats://nats:4222
-    protocol: nats
-
-routes:
-  - name: llm-default
-    path_prefix: /bifrost/
-    target: bifrost
-    allowed_roles: ["admin", "agent"]
-  - name: bus-events
-    path_prefix: /events/
-    target: nats
-    allowed_roles: ["admin", "agent"]
-  - name: admin-only
-    path_prefix: /admin/
-    target: bifrost
-    allowed_roles: ["admin"]
+    routes:
+    # appsec profile
+    - name: ghidra
+      matches:
+      - path:
+          pathPrefix: /mcp/ghidra
+      policies:
+        apiKey:
+          mode: strict
+          keys:
+          - key: $AGENTGATEWAY_ADMIN_KEY
+            metadata:
+              role: admin
+          - key: $AGENTGATEWAY_AGENT_KEY
+            metadata:
+              role: agent
+      backends:
+      - mcp:
+          targets:
+          - name: ghidra
+            mcp:
+              host: http://ghidra-mcp:8089/mcp
+    - name: radare2
+      matches:
+      - path:
+          pathPrefix: /mcp/radare2
+      policies:
+        apiKey:
+          mode: strict
+          keys:
+          - key: $AGENTGATEWAY_ADMIN_KEY
+            metadata:
+              role: admin
+          - key: $AGENTGATEWAY_AGENT_KEY
+            metadata:
+              role: agent
+      backends:
+      - mcp:
+          targets:
+          - name: radare2
+            mcp:
+              host: http://radare2-mcp:8765/mcp
+    - name: rea
+      matches:
+      - path:
+          pathPrefix: /mcp/rea
+      policies:
+        apiKey:
+          mode: strict
+          keys:
+          - key: $AGENTGATEWAY_ADMIN_KEY
+            metadata:
+              role: admin
+          - key: $AGENTGATEWAY_AGENT_KEY
+            metadata:
+              role: agent
+      backends:
+      - mcp:
+          targets:
+          - name: rea
+            mcp:
+              host: http://rea-mcp:8766/mcp
+    - name: mdb
+      matches:
+      - path:
+          pathPrefix: /mcp/mdb
+      policies:
+        apiKey:
+          mode: strict
+          keys:
+          - key: $AGENTGATEWAY_ADMIN_KEY
+            metadata:
+              role: admin
+          - key: $AGENTGATEWAY_AGENT_KEY
+            metadata:
+              role: agent
+        mcpAuthorization:
+          rules:
+          - allow: 'apiKey.role == "admin"'
+      backends:
+      - mcp:
+          targets:
+          - name: mdb
+            mcp:
+              host: http://mdb-mcp:8767/mcp
+    # android profile
+    - name: adb
+      matches:
+      - path:
+          pathPrefix: /mcp/adb
+      policies:
+        apiKey:
+          mode: strict
+          keys:
+          - key: $AGENTGATEWAY_ADMIN_KEY
+            metadata:
+              role: admin
+          - key: $AGENTGATEWAY_AGENT_KEY
+            metadata:
+              role: agent
+      backends:
+      - mcp:
+          targets:
+          - name: adb
+            mcp:
+              host: http://adb-mcp:8770/mcp
+    - name: maestro
+      matches:
+      - path:
+          pathPrefix: /mcp/maestro
+      policies:
+        apiKey:
+          mode: strict
+          keys:
+          - key: $AGENTGATEWAY_ADMIN_KEY
+            metadata:
+              role: admin
+          - key: $AGENTGATEWAY_AGENT_KEY
+            metadata:
+              role: agent
+      backends:
+      - mcp:
+          targets:
+          - name: maestro
+            mcp:
+              host: http://maestro-mcp:8771/mcp
+    # game profile
+    - name: godot
+      matches:
+      - path:
+          pathPrefix: /mcp/godot
+      policies:
+        apiKey:
+          mode: strict
+          keys:
+          - key: $AGENTGATEWAY_ADMIN_KEY
+            metadata:
+              role: admin
+          - key: $AGENTGATEWAY_AGENT_KEY
+            metadata:
+              role: agent
+      backends:
+      - mcp:
+          targets:
+          - name: godot
+            mcp:
+              host: http://godot-mcp:8780/mcp
+    - name: blender
+      matches:
+      - path:
+          pathPrefix: /mcp/blender
+      policies:
+        apiKey:
+          mode: strict
+          keys:
+          - key: $AGENTGATEWAY_ADMIN_KEY
+            metadata:
+              role: admin
+          - key: $AGENTGATEWAY_AGENT_KEY
+            metadata:
+              role: agent
+      backends:
+      - mcp:
+          targets:
+          - name: blender
+            mcp:
+              host: http://blender-mcp:8781/mcp
+    # research profile
+    - name: crawl4ai
+      matches:
+      - path:
+          pathPrefix: /mcp/crawl4ai
+      policies:
+        apiKey:
+          mode: strict
+          keys:
+          - key: $AGENTGATEWAY_ADMIN_KEY
+            metadata:
+              role: admin
+          - key: $AGENTGATEWAY_AGENT_KEY
+            metadata:
+              role: agent
+      backends:
+      - mcp:
+          targets:
+          - name: crawl4ai
+            sse:
+              host: http://crawl4ai:11235/mcp/sse
+    - name: gui
+      matches:
+      - path:
+          pathPrefix: /mcp/gui
+      policies:
+        apiKey:
+          mode: strict
+          keys:
+          - key: $AGENTGATEWAY_ADMIN_KEY
+            metadata:
+              role: admin
+          - key: $AGENTGATEWAY_AGENT_KEY
+            metadata:
+              role: agent
+        mcpAuthorization:
+          rules:
+          - allow: 'apiKey.role == "admin"'
+      backends:
+      - mcp:
+          targets:
+          - name: gui
+            mcp:
+              host: http://computer-use-linux:8790/mcp
+    # OpenAI-compatible LLM traffic (/v1/chat/completions, ...) forwarded to
+    # Bifrost's 3-tier failover gateway (compose/bifrost.yaml).
+    - name: llm-default
+      matches:
+      - path:
+          pathPrefix: /v1
+      policies:
+        apiKey:
+          mode: strict
+          keys:
+          - key: $AGENTGATEWAY_ADMIN_KEY
+            metadata:
+              role: admin
+          - key: $AGENTGATEWAY_AGENT_KEY
+            metadata:
+              role: agent
+      backends:
+      - ai:
+          name: bifrost
+          hostOverride: bifrost:8080
+          provider:
+            openAI: {}
