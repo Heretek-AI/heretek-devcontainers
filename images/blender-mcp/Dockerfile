@@ -3,7 +3,8 @@
 # Upstream publishes no container image, so this build installs the v0.11.1
 # tagged source (commit verified after checkout) next to Blender 4.2.3 LTS —
 # the Blender version upstream's own Dockerfile targets — whose tarball is
-# verified against the SHA-256 list blender.org publishes for that release.
+# verified against a SHA-256 pinned here (BLENDER_SHA256, copied from the
+# list blender.org publishes for that release), not a list fetched at build.
 # Compose tags the result localhost/heretek/blender-mcp:0.11.1. blender-mcp
 # serves streamable HTTP natively (FastMCP), at http://blender-mcp:8781/mcp.
 
@@ -23,6 +24,7 @@ FROM python:3.12.15-slim-trixie
 
 ARG BLENDER_SERIES=4.2
 ARG BLENDER_VERSION=4.2.3
+ARG BLENDER_SHA256=3a64efd1982465395abab4259b4091d5c8c56054c7267e9633e4f702a71ea3f4
 
 COPY --from=src /src /opt/blender-mcp-src
 
@@ -33,8 +35,7 @@ RUN set -eux; \
         libgl1 libglib2.0-0 libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 libxkbcommon0 libsm6 libice6; \
     cd /tmp; \
     curl -fsSLO "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"; \
-    curl -fsSLO "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}.sha256"; \
-    grep " blender-${BLENDER_VERSION}-linux-x64.tar.xz\$" "blender-${BLENDER_VERSION}.sha256" | sha256sum -c -; \
+    echo "${BLENDER_SHA256}  blender-${BLENDER_VERSION}-linux-x64.tar.xz" | sha256sum -c -; \
     tar -xJf "blender-${BLENDER_VERSION}-linux-x64.tar.xz"; \
     mv "blender-${BLENDER_VERSION}-linux-x64" /opt/blender; \
     rm -f /tmp/blender-*; \
