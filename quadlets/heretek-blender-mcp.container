@@ -1,0 +1,34 @@
+# quadlets/heretek-blender-mcp.container — socket-activated Blender MCP server (Wave 3)
+#
+# Headless Blender FastMCP server from compose/profile-game.yml, expressed as
+# a rootless Podman systemd quadlet. StopWhenUnneeded=true keeps it at 0 MB
+# idle RAM until socket activation pulls it up. Image and loopback port mirror
+# the compose profile exactly: ghcr.io/sandraschi/blender-mcp:v1.2.0 on
+# 127.0.0.1:8781 (MIT-licensed FastMCP 3.2 stack, blender --background).
+#
+# Enable + start (user systemd):
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now heretek-blender-mcp.service
+
+[Unit]
+Description=Heretek Blender MCP background server (socket-activated, 0 MB idle RAM)
+After=network-online.target
+Wants=network-online.target
+StopWhenUnneeded=true
+
+[Container]
+Image=ghcr.io/sandraschi/blender-mcp:v1.2.0
+ContainerName=heretek-blender-mcp
+User=1000:1000
+PublishPort=127.0.0.1:8781:8781
+Volume=heretek-blender-data:/data:Z
+DropCapability=ALL
+NoNewPrivileges=true
+SecurityLabelType=spc
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

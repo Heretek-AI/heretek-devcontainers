@@ -1,0 +1,38 @@
+# quadlets/heretek-ghidra-mcp.container — socket-activated Ghidra MCP server (Wave 3)
+#
+# Headless Ghidra MCP server from compose/profile-appsec.yml, expressed as a
+# rootless Podman systemd quadlet. StopWhenUnneeded=true keeps it at 0 MB idle
+# RAM until socket activation pulls it up. Image and loopback port mirror the
+# compose profile exactly: bethington/ghidra-mcp-headless:v6.0.0 on
+# 127.0.0.1:8089.
+#
+# The mandatory bearer token is NOT stored here. Provide it via a user-owned
+# environment file before starting (fail closed — the server refuses
+# unauthenticated requests without it):
+#   printf 'GHIDRA_MCP_AUTH_TOKEN=<secret>\n' > ~/.config/heretek/ghidra-mcp.env
+#   chmod 600 ~/.config/heretek/ghidra-mcp.env
+#   systemctl --user enable --now heretek-ghidra-mcp.service
+
+[Unit]
+Description=Heretek Ghidra MCP headless server (socket-activated, 0 MB idle RAM)
+After=network-online.target
+Wants=network-online.target
+StopWhenUnneeded=true
+
+[Container]
+Image=bethington/ghidra-mcp-headless:v6.0.0
+ContainerName=heretek-ghidra-mcp
+User=1000:1000
+EnvironmentFile=%h/.config/heretek/ghidra-mcp.env
+PublishPort=127.0.0.1:8089:8089
+Volume=heretek-ghidra-data:/data:Z
+DropCapability=ALL
+NoNewPrivileges=true
+SecurityLabelType=spc
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

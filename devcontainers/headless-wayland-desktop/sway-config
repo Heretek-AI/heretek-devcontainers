@@ -1,0 +1,24 @@
+# devcontainers/headless-wayland-desktop/sway-config — headless Sway session (Wave 3)
+#
+# Copied to /home/agent/.config/sway/config by the Dockerfile. Starts a
+# minimal headless output plus the AT-SPI2 bus so the computer-use-linux agent
+# can observe (accessibility tree) and act (ydotool) without any physical GPU
+# or seat. No network listeners are opened here — external access is granted
+# solely by the orchestrator's loopback-only port publish.
+
+# Headless output: 1920x1080 software framebuffer.
+output HEADLESS-1 resolution 1920x1080 position 0,0
+
+# Accessibility bus for the agent's AT-SPI2 tree reads.
+exec dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway
+exec /usr/libexec/at-spi-bus-launcher --launch-immediately &
+
+# Input synthesis daemon socket (agent-owned, mode 0600 by default).
+exec ydotoold &
+
+# Idle policy: never lock or suspend an agent-driven headless session.
+exec swayidle -w timeout 3600 'true' before-sleep 'true' &
+
+# Tiling defaults for spawned agent windows.
+default_border pixel 1
+font pango:DejaVu Sans 9

@@ -1,0 +1,30 @@
+{
+  "name": "heretek-polyglot-dev",
+  "image": "mcr.microsoft.com/devcontainers/base:1.2.2-bookworm",
+  "remoteUser": "agent",
+  "containerUser": "agent",
+  "capAdd": [],
+  "securityOpt": ["no-new-privileges:true"],
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspaces/heretek-devcontainers,type=bind,consistency=cached,Z"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "golang.go",
+        "bradlc.vscode-tailwindcss",
+        "tamasfe.even-better-toml",
+        "oven.bun-vscode"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "postCreateCommand": "mise install",
+  "remoteEnv": {
+    "HERETEK_PROFILE": "polyglot-dev"
+  }
+}

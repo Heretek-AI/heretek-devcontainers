@@ -1,0 +1,35 @@
+# devcontainers/ai-cuda-dev/pixi.toml — pinned CUDA/AI toolchain (Wave 3)
+#
+# Consumed by the `ai-cuda-dev` devcontainer (`postCreateCommand: pixi install`).
+# Channels are conda-forge first for a coherent, deduplicated solve: pixi's
+# rattler backend hardlinks identical files across environments, so the
+# PyTorch/CUDA/CMake/Ninja/OpenCV closure is stored once on disk.
+# Every dependency is pinned to an exact version — never floated.
+
+[project]
+name = "heretek-ai-cuda-dev"
+version = "0.1.0"
+description = "Heretek AI/CUDA dev environment: PyTorch 2.4 on CUDA 12.4 with CMake/Ninja/OpenCV"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[system-requirements]
+cuda = "12.4"
+
+[tasks]
+build = "cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build"
+test = "pytest -q"
+
+[dependencies]
+python = "3.12.7"
+pytorch = "2.4.1"
+cuda-version = "12.4"
+cmake = "3.30.5"
+ninja = "1.12.1"
+opencv = "4.10.0"
+pytest = "8.3.4"
+
+# NOTE (rattler hardlink dedup): pixi installs via rattler, which hardlinks
+# bit-identical files out of a content-addressed cache. Cloning this
+# environment (per-worktree `pixi install`) therefore costs ~0 extra bytes for
+# the shared PyTorch/CUDA payload instead of one full copy per worktree.

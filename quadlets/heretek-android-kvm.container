@@ -1,0 +1,39 @@
+# quadlets/heretek-android-kvm.container — socket-activated Android emulator (Wave 3)
+#
+# Heavy KVM emulator from compose/profile-android.yml, expressed as a rootless
+# Podman systemd quadlet. StopWhenUnneeded=true keeps it at 0 MB idle RAM
+# until socket activation pulls it up. Image and loopback ports mirror the
+# compose profile exactly: budtmo/docker-android:emulator_14.0 on
+# 127.0.0.1:6080 (VNC) and 127.0.0.1:5555 (ADB).
+#
+# Enable + start (user systemd):
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now heretek-android-kvm.service
+# KVM passthrough comes from the Device= mapping below (a device node grant,
+# not a capability and not a volume mount — no SELinux label rule applies).
+
+[Unit]
+Description=Heretek Android KVM emulator (socket-activated, 0 MB idle RAM)
+After=network-online.target
+Wants=network-online.target
+StopWhenUnneeded=true
+
+[Container]
+Image=budtmo/docker-android:emulator_14.0
+ContainerName=heretek-android-kvm
+User=1000:1000
+Device=/dev/kvm
+PublishPort=127.0.0.1:6080:6080
+PublishPort=127.0.0.1:5555:5555
+Volume=heretek-android-data:/data:Z
+Environment=EMULATOR_DEVICE=Samsung Galaxy S10
+DropCapability=ALL
+NoNewPrivileges=true
+SecurityLabelType=spc
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

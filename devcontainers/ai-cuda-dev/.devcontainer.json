@@ -1,0 +1,35 @@
+{
+  "name": "heretek-ai-cuda-dev",
+  "image": "nvidia/cuda:12.4.1-devel-ubuntu22.04",
+  "remoteUser": "agent",
+  "containerUser": "agent",
+  "capAdd": [],
+  "securityOpt": ["no-new-privileges:true"],
+  "runArgs": ["--gpus=all"],
+  "hostRequirements": {
+    "cpus": 8,
+    "memory": "32gb",
+    "storage": "64gb",
+    "gpu": true
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspaces/heretek-devcontainers,type=bind,consistency=cached,Z"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "tamasfe.even-better-toml"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "postCreateCommand": "pixi install",
+  "remoteEnv": {
+    "HERETEK_PROFILE": "ai-cuda-dev"
+  }
+}
