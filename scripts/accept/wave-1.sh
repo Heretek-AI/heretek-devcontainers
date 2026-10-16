@@ -16,7 +16,7 @@ for f in \
   .env.example \
   docker-compose.yml \
   compose/core.yml \
-  compose/bifrost.yaml \
+  compose/bifrost.config.json \
   compose/agentgateway.yaml \
   scripts/verify-stack.ts \
   test/compose-contracts.test.ts \
@@ -44,9 +44,9 @@ grep -q "ghcr.io/maximhq/bifrost:v2.3.0" compose/core.yml || fail "bifrost image
 grep -q "ghcr.io/agentgateway/agentgateway:v1.6.0" compose/core.yml || fail "agentgateway image not pinned"
 grep -q "nats:2.15.1-alpine" compose/core.yml || fail "nats image not pinned"
 
-echo "==> [wave-1] bifrost.yaml configures session affinity"
-grep -q "session_affinity:" compose/bifrost.yaml || fail "bifrost.yaml missing session_affinity"
-grep -q "enabled: true" compose/bifrost.yaml || fail "bifrost.yaml affinity not enabled"
+echo "==> [wave-1] bifrost config.json is mounted where Bifrost v2 reads it"
+grep -qF -- "- ./bifrost.config.json:/app/data/config.json:ro,Z" compose/core.yml || fail "bifrost.config.json not mounted at /app/data/config.json"
+grep -q '"routing_rules"' compose/bifrost.config.json || fail "bifrost.config.json missing failover routing_rules"
 
 echo "==> [wave-1] agentgateway config uses the real schema and command"
 grep -q "^binds:" compose/agentgateway.yaml || fail "agentgateway.yaml missing top-level binds:"

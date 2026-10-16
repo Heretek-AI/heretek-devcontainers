@@ -29,7 +29,7 @@
  * `COPY --from=` images must carry an explicit version tag.
  *
  * Scanned roots (each skipped gracefully when absent):
- *   docker-compose.yml, compose/*.yml (+ compose/*.yaml generic rules),
+ *   docker-compose.yml, compose/*.yml (+ compose/*.yaml, *.json generic rules),
  *   devcontainers/** (.json + Dockerfile), images/** /Dockerfile,
  *   quadlets/*.container, quadlets/*.socket, quadlets/*.service,
  *   .env (placeholder check only).
@@ -121,8 +121,8 @@ function unquote(value: string): string {
 
 // ---------------------------------------------------------------------------
 // Compose-file checks (docker-compose.yml + compose/*.yml files that declare
-// `services:`). Non-service YAML (bifrost.yaml, agentgateway.yaml) still gets
-// the generic substring rules via checkGenericContent.
+// `services:`). Non-service configs (bifrost.config.json, agentgateway.yaml)
+// still get the generic substring rules via checkGenericContent.
 // ---------------------------------------------------------------------------
 
 const BANNED_IMAGE_TOKENS = ["firecrawl", "rfingadam", "bytebot", "0xflux", "pentagi"];
@@ -651,10 +651,11 @@ function main(): void {
   if (existsSync(rootCompose)) composeFiles.push(rootCompose);
   collectFiles(join(REPO_ROOT, "compose"), ".yml", composeFiles);
 
-  // Non-service YAML configs (bifrost.yaml, agentgateway.yaml) get generic
+  // Non-service configs (agentgateway.yaml, bifrost.config.json) get generic
   // substring rules only — they declare no services/images/ports.
   const genericYaml: string[] = [];
   collectFiles(join(REPO_ROOT, "compose"), ".yaml", genericYaml);
+  collectFiles(join(REPO_ROOT, "compose"), ".json", genericYaml);
 
   const devcontainers: string[] = [];
   collectFiles(join(REPO_ROOT, "devcontainers"), ".devcontainer.json", devcontainers);

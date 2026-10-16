@@ -10,19 +10,21 @@ services:
     image: ghcr.io/maximhq/bifrost:v2.3.0
     user: "1000:1000"
     restart: unless-stopped
-    # Bifrost v2 has no `-config` flag: the image entrypoint runs /app/main,
-    # which reads $APP_DIR/config.json (APP_DIR=/app/data) and listens on 8080.
+    # Bifrost v2 has no `-config` flag: the image entrypoint runs
+    # `/app/main -app-dir $APP_DIR` (APP_DIR=/app/data), which loads
+    # $APP_DIR/config.json at startup and listens on 8080. Provider keys in
+    # that file are `env.X` references resolved from this environment.
     environment:
       BIFROST_API_KEY: ${BIFROST_API_KEY:?BIFROST_API_KEY is required}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?OPENROUTER_API_KEY is required}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
+      # APP_DIR stays a writable volume (config.db, logs.db); config.json is
+      # bind-mounted read-only over it from compose/bifrost.config.json
+      # (providers + the 3-tier failover routing rule).
       - bifrost-data:/app/data
-      # Routing/failover intent (compose/bifrost.yaml). Bifrost v2 does not
-      # read this YAML; it is mounted for operators translating it into
-      # config.json in the bifrost-data volume.
-      - ./bifrost.yaml:/app/config.yaml:ro,Z
+      - ./bifrost.config.json:/app/data/config.json:ro,Z
     cap_drop: [ALL]
     security_opt:
       - "no-new-privileges:true"

@@ -94,7 +94,7 @@ function extractPortEntries(text: string): string[] {
 
 describe("compose contracts (real files on disk)", () => {
   test("every compose and config YAML file parses", () => {
-    const yamlFiles = [...composeFiles(), join(REPO_ROOT, "compose/agentgateway.yaml"), join(REPO_ROOT, "compose/bifrost.yaml")];
+    const yamlFiles = [...composeFiles(), join(REPO_ROOT, "compose/agentgateway.yaml")];
     for (const file of yamlFiles) {
       expect(() => Bun.YAML.parse(readText(file))).not.toThrow();
     }

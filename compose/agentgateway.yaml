@@ -250,7 +250,7 @@ binds:
             mcp:
               host: http://computer-use-linux:8790/mcp
     # OpenAI-compatible LLM traffic (/v1/chat/completions, ...) forwarded to
-    # Bifrost's 3-tier failover gateway (compose/bifrost.yaml).
+    # Bifrost's 3-tier failover gateway (compose/bifrost.config.json).
     - name: llm-default
       matches:
       - path:

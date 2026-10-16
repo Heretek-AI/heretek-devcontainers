@@ -57,6 +57,17 @@ SSE at `/mcp/sse`). Compose labels (`heretek.mcp.target`, `.transport`,
 make images   # resolve every pinned remote image against Docker Hub / GHCR / MCR (network)
 ```
 
+### LLM gateway
+
+`compose/bifrost.config.json` is the Bifrost v2.3.0 `config.json`, bind-mounted
+read-only at `/app/data/config.json` (Bifrost loads `$APP_DIR/config.json`;
+`APP_DIR=/app/data` stays a writable volume for its SQLite stores). It declares
+the `opencode-go` (host `:11434`), `openrouter` and `vllm` (host `:8000`)
+providers and one global routing rule, `default-llm`, that targets
+`opencode-go` and falls back to `openrouter` then `vllm`. Provider keys are
+`env.BIFROST_API_KEY` / `env.OPENROUTER_API_KEY` references; no secret is
+written to the file.
+
 ### Agent gateway
 
 `compose/agentgateway.yaml` is an agentgateway v1.6.0 standalone config
