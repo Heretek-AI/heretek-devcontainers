@@ -33,8 +33,13 @@ interface RoutingRule {
   fallbacks?: string[];
 }
 interface BifrostConfig {
+  client?: { enforce_auth_on_inference?: boolean };
   providers: Record<string, Provider>;
-  governance: { routing_rules: RoutingRule[] };
+  governance: {
+    auth_config?: { is_enabled?: boolean; admin_username?: string; admin_password?: string };
+    virtual_keys?: Array<{ id: string; value?: string; is_active?: boolean; allow_all_providers?: boolean }>;
+    routing_rules: RoutingRule[];
+  };
 }
 
 function config(): BifrostConfig {
@@ -69,7 +74,15 @@ describe("bifrost 3-tier failover config.json (real file on disk)", () => {
     expect(rule.enabled).toBe(true);
     expect(rule.cel_expression).toBe("true");
     expect(rule.targets).toEqual([{ provider: "opencode-go", weight: 1.0 }]);
-    expect(rule.fallbacks).toEqual(["openrouter/", "vllm/hosted-llm"]);
+    expect(rule.fallbacks).toEqual(["openrouter/anthropic/claude-default", "vllm/hosted-llm"]);
+    // Each fallback names a model its provider key allows.
+    const { providers } = config();
+    for (const fallback of rule.fallbacks ?? []) {
+      const slash = fallback.indexOf("/");
+      const provider = fallback.slice(0, slash);
+      const model = fallback.slice(slash + 1);
+      expect(providers[provider].keys.some((k) => k.models?.includes(model))).toBe(true);
+    }
   });
 
   test("provider keys reference env vars, never literal secrets", () => {
@@ -83,5 +96,28 @@ describe("bifrost 3-tier failover config.json (real file on disk)", () => {
         expect(key.value === "" || key.value.startsWith("env.")).toBe(true);
       }
     }
+  });
+
+  test("inference and management auth are enforced with env-referenced credentials", () => {
+    const { client, governance } = config();
+    expect(client?.enforce_auth_on_inference).toBe(true);
+    expect(governance.auth_config).toEqual({
+      is_enabled: true,
+      admin_username: "env.BIFROST_ADMIN_USERNAME",
+      admin_password: "env.BIFROST_ADMIN_PASSWORD",
+    });
+    expect(governance.virtual_keys).toHaveLength(1);
+    const [vk] = governance.virtual_keys ?? [];
+    expect(vk.id).toBe("agentgateway");
+    expect(vk.value).toBe("env.BIFROST_VIRTUAL_KEY");
+    expect(vk.is_active).toBe(true);
+  });
+
+  test("bifrost publishes no port and shares only the llm network with agentgateway", () => {
+    const core = readFileSync(join(REPO_ROOT, "compose", "core.yml"), "utf8");
+    const bifrost = core.slice(core.indexOf("  bifrost:"), core.indexOf("  agentgateway:"));
+    expect(bifrost).not.toMatch(/^\s*ports\s*:/m);
+    expect(bifrost).toContain("networks: [llm]");
+    expect(core).toContain("networks: [default, llm]");
   });
 });

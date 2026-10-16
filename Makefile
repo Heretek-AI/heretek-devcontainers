@@ -38,7 +38,7 @@ images:
 validate-gateway:
 	@if [ -n "$(AGENTGATEWAY)" ] && [ -x "$(AGENTGATEWAY)" ]; then \
 		echo "==> $(AGENTGATEWAY) -f compose/agentgateway.yaml --validate-only"; \
-		AGENTGATEWAY_ADMIN_KEY=validate-only AGENTGATEWAY_AGENT_KEY=validate-only \
+		AGENTGATEWAY_ADMIN_KEY=validate-only AGENTGATEWAY_AGENT_KEY=validate-only BIFROST_VIRTUAL_KEY=validate-only \
 			"$(AGENTGATEWAY)" -f compose/agentgateway.yaml --validate-only; \
 	else \
 		echo "==> agentgateway binary not found (set AGENTGATEWAY=/path/to/agentgateway) — skipping"; \
@@ -47,7 +47,7 @@ validate-gateway:
 validate-compose:
 	@if command -v docker >/dev/null 2>&1; then \
 		echo "==> docker compose --profile all config -q"; \
-		BIFROST_API_KEY=x OPENROUTER_API_KEY=x AGENTGATEWAY_ADMIN_KEY=x AGENTGATEWAY_AGENT_KEY=x \
+		BIFROST_API_KEY=x OPENROUTER_API_KEY=x BIFROST_VIRTUAL_KEY=x BIFROST_ADMIN_USERNAME=x BIFROST_ADMIN_PASSWORD=x AGENTGATEWAY_ADMIN_KEY=x AGENTGATEWAY_AGENT_KEY=x \
 		GHIDRA_MCP_AUTH_TOKEN=x SEARXNG_SECRET=x docker compose --profile all config -q; \
 	else \
 		echo "==> docker not found — skipping"; \

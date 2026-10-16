@@ -142,6 +142,8 @@ describe("agentgateway routing contract", () => {
     const ai = llm?.backends[0].ai as { hostOverride: string; provider: Yaml };
     expect(ai.hostOverride).toBe("bifrost:8080");
     expect(ai.provider).toHaveProperty("openAI");
+    const headers = llm?.policies?.requestHeaderModifier as { set: Record<string, string> };
+    expect(headers.set["x-bf-vk"]).toBe("$BIFROST_VIRTUAL_KEY");
   });
 
   test("compose runs the gateway with -f on the mounted config", () => {

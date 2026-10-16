@@ -9,7 +9,7 @@ the fail-closed static verifier (`scripts/verify-stack.ts`).
 
 | Profile  | Services | Purpose |
 |---|---|---|
-| `core` | `bifrost` (`:8080`), `agentgateway` (`:3000`), `nats` (`:4222`, `:8222`) | Always-loaded foundation: LLM gateway with 3-tier failover, agent gateway, message bus |
+| `core` | `bifrost` (internal `:8080`, not published), `agentgateway` (`:3000`), `nats` (`:4222`, `:8222`) | Always-loaded foundation: LLM gateway with 3-tier failover, agent gateway, message bus |
 | `appsec` | `ghidra-mcp` (`:8089`), `radare2-mcp` (`:8765`), `rea-mcp` (`:8766`), `mdb-mcp` (`:8767`) | Reverse-engineering MCP bridges (on demand) |
 | `android` | `android-kvm` (`:6080`, `:5555`), `adb-mcp` (`:8770`), `maestro-mcp` (`:8771`) | KVM emulator + mobile automation bridges (on demand) |
 | `game` | `godot-mcp` (`:8780`), `blender-mcp` (`:8781`) | Headless game-engine MCP bridges (on demand) |
@@ -64,9 +64,15 @@ read-only at `/app/data/config.json` (Bifrost loads `$APP_DIR/config.json`;
 `APP_DIR=/app/data` stays a writable volume for its SQLite stores). It declares
 the `opencode-go` (host `:11434`), `openrouter` and `vllm` (host `:8000`)
 providers and one global routing rule, `default-llm`, that targets
-`opencode-go` and falls back to `openrouter` then `vllm`. Provider keys are
-`env.BIFROST_API_KEY` / `env.OPENROUTER_API_KEY` references; no secret is
-written to the file.
+`opencode-go` and falls back to `openrouter/anthropic/claude-default` then
+`vllm/hosted-llm`. Provider keys are `env.BIFROST_API_KEY` /
+`env.OPENROUTER_API_KEY` references; no secret is written to the file.
+
+Bifrost publishes no host port and sits only on the `llm` network it shares
+with agentgateway. Inference requires the `agentgateway` virtual key
+(`env.BIFROST_VIRTUAL_KEY`), which agentgateway's `/v1` route sends as
+`x-bf-vk`; the management API and dashboard require
+`BIFROST_ADMIN_USERNAME` / `BIFROST_ADMIN_PASSWORD`.
 
 ### Agent gateway
 

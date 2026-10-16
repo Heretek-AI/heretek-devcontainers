@@ -17,8 +17,14 @@ services:
     environment:
       BIFROST_API_KEY: ${BIFROST_API_KEY:?BIFROST_API_KEY is required}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?OPENROUTER_API_KEY is required}
-    ports:
-      - "127.0.0.1:8080:8080"
+      # Inference needs this virtual key (agentgateway sends it as x-bf-vk);
+      # the admin pair guards the management API and dashboard.
+      BIFROST_VIRTUAL_KEY: ${BIFROST_VIRTUAL_KEY:?BIFROST_VIRTUAL_KEY is required}
+      BIFROST_ADMIN_USERNAME: ${BIFROST_ADMIN_USERNAME:?BIFROST_ADMIN_USERNAME is required}
+      BIFROST_ADMIN_PASSWORD: ${BIFROST_ADMIN_PASSWORD:?BIFROST_ADMIN_PASSWORD is required}
+    # No published port and only the `llm` network: agentgateway is the one
+    # caller that can reach Bifrost.
+    networks: [llm]
     volumes:
       # APP_DIR stays a writable volume (config.db, logs.db); config.json is
       # bind-mounted read-only over it from compose/bifrost.config.json
@@ -46,9 +52,11 @@ services:
       # a referenced variable is unset (fail closed).
       AGENTGATEWAY_ADMIN_KEY: ${AGENTGATEWAY_ADMIN_KEY:?AGENTGATEWAY_ADMIN_KEY is required}
       AGENTGATEWAY_AGENT_KEY: ${AGENTGATEWAY_AGENT_KEY:?AGENTGATEWAY_AGENT_KEY is required}
+      BIFROST_VIRTUAL_KEY: ${BIFROST_VIRTUAL_KEY:?BIFROST_VIRTUAL_KEY is required}
     depends_on:
       bifrost:
         condition: service_started
+    networks: [default, llm]
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
@@ -83,3 +91,8 @@ volumes:
     driver: local
   nats-data:
     driver: local
+
+networks:
+  # Bifrost's only network, shared with agentgateway alone. Not `internal`:
+  # Bifrost still needs egress to OpenRouter.
+  llm: {}

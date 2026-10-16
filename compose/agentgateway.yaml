@@ -265,6 +265,10 @@ binds:
           - key: $AGENTGATEWAY_AGENT_KEY
             metadata:
               role: agent
+        # Bifrost enforces inference auth; this is its virtual key.
+        requestHeaderModifier:
+          set:
+            x-bf-vk: $BIFROST_VIRTUAL_KEY
       backends:
       - ai:
           name: bifrost
