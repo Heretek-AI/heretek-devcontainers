@@ -7,9 +7,15 @@
 # (or `--profile all` for everything). Every service is hardened fail-closed:
 # pinned image, 127.0.0.1 loopback ports only, cap_drop ALL,
 # no-new-privileges, non-root user, zero socket mounts.
+#
+# searxng and crawl4ai are published images pinned to exact release tags.
+# computer-use-linux publishes no image, so it is a pinned local build
+# (images/computer-use-linux/Dockerfile) tagged localhost/heretek/...:<version>;
+# `pull_policy: build` keeps compose from pulling the local name.
+# MCP endpoints are declared with `heretek.mcp.*` labels for the gateway.
 services:
   searxng:
-    image: searxng/searxng:2026.10.14
+    image: searxng/searxng:2026.10.16-0ce72dd2c
     user: "1000:1000"
     restart: unless-stopped
     profiles: ["research", "all"]
@@ -35,6 +41,11 @@ services:
     restart: unless-stopped
     profiles: ["research", "all"]
     shm_size: "1g"
+    # crawl4ai's server exposes its MCP tools over SSE at /mcp/sse.
+    labels:
+      heretek.mcp.target: crawl4ai
+      heretek.mcp.transport: sse
+      heretek.mcp.path: /mcp/sse
     ports:
       - "127.0.0.1:11235:11235"
     volumes:
@@ -49,7 +60,10 @@ services:
       retries: 3
 
   computer-use-linux:
-    image: ghcr.io/agent-sh/computer-use-linux:v0.9.4
+    image: localhost/heretek/computer-use-linux:0.7.17
+    build:
+      context: ../images/computer-use-linux
+    pull_policy: build
     user: "1000:1000"
     restart: unless-stopped
     profiles: ["research", "all"]
@@ -57,6 +71,10 @@ services:
     environment:
       WLR_BACKENDS: headless
       SWAY_HEADLESS: "1"
+    labels:
+      heretek.mcp.target: gui
+      heretek.mcp.transport: streamable-http
+      heretek.mcp.path: /mcp
     ports:
       - "127.0.0.1:8790:8790"
     volumes:
@@ -65,7 +83,7 @@ services:
     security_opt:
       - "no-new-privileges:true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8790/healthz"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/status', timeout=4)"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -1,0 +1,8 @@
+# Minimal headless Sway session for computer-use-linux (no input devices,
+# software rendering, one virtual output).
+output HEADLESS-1 resolution 1920x1080 position 0,0
+default_border none
+focus_follows_mouse no
+
+# AT-SPI2 accessibility bus for the accessibility-tree tools.
+exec /usr/libexec/at-spi-bus-launcher --launch-immediately

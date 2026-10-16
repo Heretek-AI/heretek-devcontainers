@@ -1,18 +1,30 @@
 # compose/profile-game.yml — `game` on-demand domain profile (Wave 2)
 #
-# Headless Godot 4.3 + Blender FastMCP 3.2 MCP servers. Activated on demand via:
+# Headless Godot 4.3 + Blender 4.2 LTS FastMCP servers. Activated on demand via:
 #   docker compose --profile game up
 # (or `--profile all` for everything). Every service is hardened fail-closed:
 # pinned image, 127.0.0.1 loopback ports only, cap_drop ALL,
 # no-new-privileges, non-root user, zero socket mounts.
+#
+# Neither upstream publishes a container image, so both are pinned local
+# builds (images/<service>/Dockerfile) tagged localhost/heretek/<service>:<version>;
+# `pull_policy: build` keeps compose from pulling the local names. Both speak
+# MCP over streamable HTTP at /mcp (see the `heretek.mcp.*` labels).
 services:
   godot-mcp:
-    image: ghcr.io/tugcantopaloglu/godot-mcp:v3.1.0
+    image: localhost/heretek/godot-mcp:3.1.0
+    build:
+      context: ../images/godot-mcp
+    pull_policy: build
     user: "1000:1000"
     restart: unless-stopped
     profiles: ["game", "all"]
     environment:
       GODOT_HEADLESS: "1"
+    labels:
+      heretek.mcp.target: godot
+      heretek.mcp.transport: streamable-http
+      heretek.mcp.path: /mcp
     ports:
       - "127.0.0.1:8780:8780"
     volumes:
@@ -21,20 +33,27 @@ services:
     security_opt:
       - "no-new-privileges:true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8780/healthz"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8780/status', timeout=4)"]
       interval: 30s
       timeout: 5s
       retries: 3
 
   blender-mcp:
-    image: ghcr.io/sandraschi/blender-mcp:v1.2.0
+    image: localhost/heretek/blender-mcp:0.11.1
+    build:
+      context: ../images/blender-mcp
+    pull_policy: build
     user: "1000:1000"
     restart: unless-stopped
     profiles: ["game", "all"]
-    # Headless Blender background mode serving the FastMCP 3.2 bridge.
-    command: ["blender", "--background"]
+    # The image serves the FastMCP server over streamable HTTP; it drives
+    # Blender 4.2.3 headless (`blender --background`) per operation.
     environment:
       BLENDER_HEADLESS: "1"
+    labels:
+      heretek.mcp.target: blender
+      heretek.mcp.transport: streamable-http
+      heretek.mcp.path: /mcp
     ports:
       - "127.0.0.1:8781:8781"
     volumes:
@@ -43,7 +62,7 @@ services:
     security_opt:
       - "no-new-privileges:true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8781/healthz"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8781"]
       interval: 30s
       timeout: 5s
       retries: 3
