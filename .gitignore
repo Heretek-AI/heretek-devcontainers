@@ -5,3 +5,6 @@ worktrees/
 
 # Preserve triad red-proof evidence (binding gate)
 !docs/evidence/**/*.log
+
+# Verifier fixture trees carry deliberately fake .env files (test/fixtures/verify/*/.env).
+!test/fixtures/**/.env

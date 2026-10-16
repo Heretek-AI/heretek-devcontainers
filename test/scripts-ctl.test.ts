@@ -307,73 +307,82 @@ describe("devcontainer contracts (real files on disk)", () => {
 // ---------------------------------------------------------------------------
 
 describe("quadlet contracts (real files on disk)", () => {
-  const QUADLETS = [
-    "quadlets/heretek-android-kvm.container",
-    "quadlets/heretek-ghidra-mcp.container",
-    "quadlets/heretek-blender-mcp.container",
-  ];
+  const CONTAINERS: Record<string, { image: string; sockets: Record<string, [listen: string, inner: string]> }> = {
+    "heretek-android-kvm": {
+      image: "budtmo/docker-android:emulator_14.0_v3.8.0-p1",
+      sockets: {
+        "heretek-android-kvm-vnc-proxy": ["127.0.0.1:6080", "127.0.0.1:16080"],
+        "heretek-android-kvm-adb-proxy": ["127.0.0.1:5555", "127.0.0.1:15555"],
+      },
+    },
+    "heretek-ghidra-mcp": {
+      image: "localhost/heretek/ghidra-mcp:6.0.0",
+      sockets: { "heretek-ghidra-mcp-proxy": ["127.0.0.1:8089", "127.0.0.1:18089"] },
+    },
+    "heretek-blender-mcp": {
+      image: "localhost/heretek/blender-mcp:0.11.1",
+      sockets: { "heretek-blender-mcp-proxy": ["127.0.0.1:8781", "127.0.0.1:18781"] },
+    },
+  };
 
-  test("all 3 quadlet units exist", () => {
-    for (const rel of QUADLETS) {
-      expect(existsSync(join(REPO_ROOT, rel))).toBe(true);
+  test("every container unit stops when unneeded and never starts on its own", () => {
+    for (const unit of Object.keys(CONTAINERS)) {
+      const text = readText(`quadlets/${unit}.container`);
+      expect(text).toContain("StopWhenUnneeded=true");
+      expect(text).not.toMatch(/^\[Install\]/m);
+      expect(text).not.toMatch(/^WantedBy=/m);
     }
   });
 
-  test("every quadlet stops when unneeded (0 MB idle RAM)", () => {
-    for (const rel of QUADLETS) {
-      expect(readText(rel)).toContain("StopWhenUnneeded=true");
+  test("every container unit pins the same image as compose", () => {
+    for (const [unit, { image }] of Object.entries(CONTAINERS)) {
+      expect(readText(`quadlets/${unit}.container`)).toContain(`Image=${image}`);
     }
   });
 
-  test("every quadlet image is pinned to its exact spec version", () => {
-    const expected: Record<string, string> = {
-      "quadlets/heretek-android-kvm.container": "Image=budtmo/docker-android:emulator_14.0",
-      "quadlets/heretek-ghidra-mcp.container": "Image=bethington/ghidra-mcp-headless:v6.0.0",
-      "quadlets/heretek-blender-mcp.container": "Image=ghcr.io/sandraschi/blender-mcp:v1.2.0",
-    };
-    for (const [rel, line] of Object.entries(expected)) {
-      expect(readText(rel)).toContain(line);
-    }
-  });
-
-  test("every quadlet publishes loopback-only ports", () => {
-    const expectedPorts: Record<string, string[]> = {
-      "quadlets/heretek-android-kvm.container": ["PublishPort=127.0.0.1:6080:6080", "PublishPort=127.0.0.1:5555:5555"],
-      "quadlets/heretek-ghidra-mcp.container": ["PublishPort=127.0.0.1:8089:8089"],
-      "quadlets/heretek-blender-mcp.container": ["PublishPort=127.0.0.1:8781:8781"],
-    };
-    for (const [rel, ports] of Object.entries(expectedPorts)) {
-      const text = readText(rel);
-      for (const port of ports) {
-        expect(text).toContain(port);
+  test("each heavy service has a loopback .socket and a socket-proxyd .service that pulls it up", () => {
+    for (const [unit, { sockets }] of Object.entries(CONTAINERS)) {
+      for (const [proxy, [listen, inner]] of Object.entries(sockets)) {
+        const socket = readText(`quadlets/${proxy}.socket`);
+        expect(socket).toContain(`ListenStream=${listen}`);
+        expect(socket).toContain("WantedBy=sockets.target");
+        const service = readText(`quadlets/${proxy}.service`);
+        expect(service).toMatch(new RegExp(`^Requires=.*\\b${unit}\\.service\\b`, "m"));
+        expect(service).toMatch(new RegExp(`^After=.*\\b${unit}\\.service\\b`, "m"));
+        expect(service).toContain("systemd-socket-proxyd --exit-idle-time=");
+        expect(service).toContain(` ${inner}`);
+        expect(readText(`quadlets/${unit}.container`)).toContain(`PublishPort=${inner}:`);
       }
-      for (const line of text.split("\n")) {
-        if (line.trim().startsWith("PublishPort=")) {
-          expect(line).toContain("127.0.0.1:");
-        }
-      }
     }
   });
 
-  test("every quadlet drops all capabilities, denies privilege gain, and sets a volume label", () => {
-    for (const rel of QUADLETS) {
-      const text = readText(rel);
+  test("containers are confined: no spc_t / label disable, caps dropped, no privilege gain", () => {
+    for (const unit of Object.keys(CONTAINERS)) {
+      const text = readText(`quadlets/${unit}.container`);
+      expect(text).not.toMatch(/^SecurityLabel(Type|Disable)=/m);
+      expect(text).not.toMatch(/^Privileged=/m);
       expect(text).toContain("DropCapability=ALL");
       expect(text).toContain("NoNewPrivileges=true");
       expect(text).toMatch(/Volume=.*:Z/);
+      expect(text).toContain("Notify=healthy");
+      for (const line of text.split("\n")) {
+        if (line.startsWith("PublishPort=")) expect(line.startsWith("PublishPort=127.0.0.1:")).toBe(true);
+      }
     }
   });
 
-  test("android quadlet passes through /dev/kvm; ghidra keeps its token out of the repo", () => {
-    expect(readText("quadlets/heretek-android-kvm.container")).toContain("Device=/dev/kvm");
+  test("android quadlet adds only /dev/kvm; ghidra keeps its token out of the repo", () => {
+    const android = readText("quadlets/heretek-android-kvm.container");
+    expect(android).toContain("AddDevice=/dev/kvm");
+    expect(android).not.toMatch(/^Device=/m);
     const ghidra = readText("quadlets/heretek-ghidra-mcp.container");
     expect(ghidra).toContain("EnvironmentFile=");
     expect(ghidra).toContain("GHIDRA_MCP_AUTH_TOKEN");
   });
 
-  test("no floating tags or socket mounts in any quadlet", () => {
-    for (const rel of QUADLETS) {
-      const text = readText(rel);
+  test("no floating tags or socket mounts in any quadlet unit", () => {
+    for (const unit of Object.keys(CONTAINERS)) {
+      const text = readText(`quadlets/${unit}.container`);
       expect(text).not.toContain(":latest");
       expect(text).not.toContain("docker.sock");
       expect(text).not.toContain("podman.sock");
@@ -425,7 +434,7 @@ describe("toolchain templates (real files on disk)", () => {
     for (const pkg of ["sway", "at-spi2-core", "ydotool"]) {
       expect(text).toContain(pkg);
     }
-    expect(text).toContain("ghcr.io/agent-sh/computer-use-linux:v0.9.4");
+    expect(text).toContain("localhost/heretek/computer-use-linux:0.7.17");
   });
 
   test("headless desktop Dockerfile runs as non-root with no socket mounts", () => {
@@ -440,31 +449,11 @@ describe("toolchain templates (real files on disk)", () => {
 // Verifier fail-closed coverage
 // ---------------------------------------------------------------------------
 
-describe("verify-stack fail-closed coverage", () => {
-  test("verifier passes green on the clean Wave 3 tree", () => {
+describe("verify-stack on the real tree", () => {
+  test("verifier passes green on the clean tree", () => {
     const r = run(["bun", "run", VERIFY_TS]);
     expect(r.exit).toBe(0);
     expect(r.out).toContain("PASS");
   });
-
-  test("verifier source enforces all six contract rules plus the env placeholder rule", () => {
-    const source = readText("scripts/verify-stack.ts");
-    for (const rule of [
-      "NO_FLOATING_TAGS",
-      "NO_DOCKER_SOCK",
-      "LOOPBACK_PORTS_ONLY",
-      "HARDENED_CAPS",
-      "SELINUX_VOLUME_LABELS",
-      "NO_AGPL_IN_DEV_OR_GAME",
-      "ENV_PLACEHOLDER_LEAK",
-    ]) {
-      expect(source).toContain(rule);
-    }
-  });
-
-  test("verifier scans devcontainer and quadlet roots (Wave 3 coverage)", () => {
-    const source = readText("scripts/verify-stack.ts");
-    expect(source).toContain("devcontainers");
-    expect(source).toContain("quadlets");
-  });
+  // Per-rule fail-closed regression tests live in test/verify-stack.test.ts.
 });

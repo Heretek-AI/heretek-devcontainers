@@ -1,0 +1,10 @@
+[Unit]
+Description=fixture
+StopWhenUnneeded=true
+
+[Container]
+Image=localhost/heretek/web:1.0.0
+PublishPort=127.0.0.1:18080:8080
+Volume=heretek-web:/data:Z
+DropCapability=ALL
+NoNewPrivileges=true
