@@ -1,34 +1,46 @@
-# quadlets/heretek-blender-mcp.container — socket-activated Blender MCP server (Wave 3)
+# quadlets/heretek-blender-mcp.container — on-demand Blender MCP server (rootless Podman quadlet)
 #
-# Headless Blender FastMCP server from compose/profile-game.yml, expressed as
-# a rootless Podman systemd quadlet. StopWhenUnneeded=true keeps it at 0 MB
-# idle RAM until socket activation pulls it up. Image and loopback port mirror
-# the compose profile exactly: ghcr.io/sandraschi/blender-mcp:v1.2.0 on
-# 127.0.0.1:8781 (MIT-licensed FastMCP 3.2 stack, blender --background).
+# Socket-activated: heretek-blender-mcp-proxy.socket owns 127.0.0.1:8781. The
+# first connection starts heretek-blender-mcp-proxy.service (systemd-socket-proxyd),
+# which Requires= this unit, so the container is started on demand and proxied
+# to its container-only port 127.0.0.1:18781. When the proxy exits after
+# --exit-idle-time with no connections, nothing needs this unit any more and
+# StopWhenUnneeded=true stops the container: 0 MB RAM while idle. This unit has
+# no [Install] section on purpose — it must never start at login.
 #
-# Enable + start (user systemd):
+# Image: localhost/heretek/blender-mcp:0.11.1 (MIT FastMCP server + Blender
+# 4.2.3 LTS), the same pinned local build as compose/profile-game.yml. Build it
+# once before enabling the socket:
+#   podman build -t localhost/heretek/blender-mcp:0.11.1 images/blender-mcp
+#
+# Install (see README "Quadlets"):
+#   cp quadlets/heretek-blender-mcp.container ~/.config/containers/systemd/
+#   cp quadlets/heretek-blender-mcp-proxy.socket quadlets/heretek-blender-mcp-proxy.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
-#   systemctl --user enable --now heretek-blender-mcp.service
+#   systemctl --user enable --now heretek-blender-mcp-proxy.socket
+#
+# SELinux: default container_t confinement (no SecurityLabelType override).
 
 [Unit]
-Description=Heretek Blender MCP background server (socket-activated, 0 MB idle RAM)
+Description=Heretek Blender MCP background server (socket-activated, stops when idle)
 After=network-online.target
 Wants=network-online.target
 StopWhenUnneeded=true
 
 [Container]
-Image=ghcr.io/sandraschi/blender-mcp:v1.2.0
+Image=localhost/heretek/blender-mcp:0.11.1
+Pull=never
 ContainerName=heretek-blender-mcp
 User=1000:1000
-PublishPort=127.0.0.1:8781:8781
+PublishPort=127.0.0.1:18781:8781
 Volume=heretek-blender-data:/data:Z
 DropCapability=ALL
 NoNewPrivileges=true
-SecurityLabelType=spc
+HealthCmd=bash -c 'exec 3<>/dev/tcp/127.0.0.1/8781'
+HealthInterval=10s
+HealthStartPeriod=60s
+Notify=healthy
 
 [Service]
 Restart=on-failure
 TimeoutStartSec=300
-
-[Install]
-WantedBy=default.target

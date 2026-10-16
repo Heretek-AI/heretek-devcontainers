@@ -1,0 +1,13 @@
+# quadlets/heretek-android-kvm-adb-proxy.socket — ADB activation socket for heretek-android-kvm
+#
+# Listens on the loopback-only port compose also uses (127.0.0.1:5555) and
+# activates heretek-android-kvm-adb-proxy.service on the first connection.
+
+[Unit]
+Description=Heretek Android KVM ADB activation socket (127.0.0.1:5555)
+
+[Socket]
+ListenStream=127.0.0.1:5555
+
+[Install]
+WantedBy=sockets.target

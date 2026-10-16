@@ -1,0 +1,15 @@
+# quadlets/heretek-blender-mcp-proxy.service — socket proxy for heretek-blender-mcp
+#
+# Started by heretek-blender-mcp-proxy.socket. Pulls up the container unit
+# (Requires=/After=; Notify=healthy there delays "started" until the server
+# answers) and forwards connections to the container's loopback port. It exits
+# after 15 idle minutes (--exit-idle-time, systemd-socket-proxyd's idle
+# timeout), which lets StopWhenUnneeded=true stop the container.
+
+[Unit]
+Description=Heretek Blender MCP socket proxy (exits when idle)
+Requires=heretek-blender-mcp.service heretek-blender-mcp-proxy.socket
+After=heretek-blender-mcp.service heretek-blender-mcp-proxy.socket
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=15min 127.0.0.1:18781

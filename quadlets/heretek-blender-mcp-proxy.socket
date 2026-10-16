@@ -1,0 +1,14 @@
+# quadlets/heretek-blender-mcp-proxy.socket — activation socket for heretek-blender-mcp
+#
+# Listens on the loopback-only port compose also uses (127.0.0.1:8781) and
+# activates heretek-blender-mcp-proxy.service on the first connection.
+# This is the only Blender unit that is enabled (WantedBy=sockets.target).
+
+[Unit]
+Description=Heretek Blender MCP activation socket (127.0.0.1:8781)
+
+[Socket]
+ListenStream=127.0.0.1:8781
+
+[Install]
+WantedBy=sockets.target
