@@ -1,0 +1,145 @@
+# Wave 3 QA Red-Proof Evidence — docs/evidence/wave-3/red-proofs.log
+- Date (UTC): 2026-10-16T01:38:48Z
+- Branch: wave-3-devcontainers-ctl
+- Worktree: /home/john/Projects/Heretek-AI-Rebuild/heretek-devcontainers/worktrees/wave-3
+- Role: agency-qa (QA Verifier, Wave 3)
+
+## 1. Green path (all exit 0, clean tree)
+
+### make check
+COMMAND: make check
+OBSERVED:
+  ==> bun run scripts/verify-stack.ts
+  PASS: all security contracts hold across 13 scanned file(s).
+  ==> bun test
+  bun test v1.4.2 (744846f84)
+   75 pass
+   0 fail
+   483 expect() calls
+  Ran 75 tests across 3 files. [310.00ms]
+EXIT: 0
+
+### make accept (all 3 waves)
+COMMAND: make accept
+OBSERVED: WAVE-1 ACCEPT PASS, WAVE-2 ACCEPT PASS, WAVE-3 ACCEPT PASS
+  (wave-3.sh also asserts: 14 required files exist, operator scripts +x,
+   devcontainer JSON valid + SELinux labels, mise/pixi pins, pinned Debian
+   base, dry-run bwrap+landrun+mise chain, 6-profile list, quadlet
+   unit/image/port checks, verifier + tests + wave-1/2 regression green)
+EXIT: 0
+
+### Individual accept gates
+COMMAND: bash scripts/accept/wave-1.sh  -> WAVE-1 ACCEPT PASS, EXIT 0 (via make accept)
+COMMAND: bash scripts/accept/wave-2.sh  -> WAVE-2 ACCEPT PASS, EXIT 0 (via make accept)
+COMMAND: bash scripts/accept/wave-3.sh  -> WAVE-3 ACCEPT PASS, EXIT 0 (via make accept)
+
+### bun test
+COMMAND: bun test
+OBSERVED:
+  75 pass
+  0 fail
+  483 expect() calls
+  Ran 75 tests across 3 files.
+EXIT: 0 (expectation: 70+ tests — met with 75)
+
+### bun run scripts/verify-stack.ts
+COMMAND: bun run scripts/verify-stack.ts
+OBSERVED: PASS: all security contracts hold across 13 scanned file(s).
+EXIT: 0 (expectation: 13 files — met)
+
+## 2. Functional checks (Wave 3 SPEC §2.3)
+
+### heretek-exec.sh --dry-run chain
+COMMAND: bash scripts/heretek-exec.sh --dry-run echo hello
+OBSERVED (excerpt):
+  heretek-exec dry-run:
+  workdir: /home/john/Projects/Heretek-AI-Rebuild/heretek-devcontainers/worktrees/wave-3
+  kvm: disabled (accelerator node not passed through)
+  bwrap: bwrap --unshare-all --die-with-parent --new-session --ro-bind /usr /usr ... --chdir <workdir>
+  landrun: landrun --
+  mise: mise exec --
+  payload: echo hello
+  full: bwrap ... landrun -- mise exec -- echo hello
+ASSERT: output contains all three of "bwrap", "landrun", "mise exec" -> PASS
+EXIT: 0
+
+### heretek-box-ctl.sh list-profiles
+COMMAND: bash scripts/heretek-box-ctl.sh list-profiles
+OBSERVED:
+  core
+  appsec
+  android
+  game
+  research
+  all
+ASSERT: lists core appsec android game research all -> PASS
+EXIT: 0
+
+### heretek-box-ctl.sh verify
+COMMAND: bash scripts/heretek-box-ctl.sh verify
+OBSERVED: PASS: all security contracts hold across 13 scanned file(s).
+EXIT: 0
+
+### Quadlet StopWhenUnneeded=true
+COMMAND: grep -c "StopWhenUnneeded=true" quadlets/*.container
+OBSERVED:
+  quadlets/heretek-android-kvm.container:2
+  quadlets/heretek-blender-mcp.container:2
+  quadlets/heretek-ghidra-mcp.container:2
+ASSERT: every quadlet contains StopWhenUnneeded=true -> PASS
+NOTE: count is 2 per file because the token appears once in the header
+comment (0 MB idle RAM note) and once in the [Unit] section. The binding
+[Unit] occurrence was verified in file reads.
+
+## Sabotage A (NO_FLOATING_TAGS) — 2026-10-16 UTC
+COMMAND: python3 replace 'bethington/ghidra-mcp-headless:v6.0.0' -> 'bethington/ghidra-mcp-headless:latest' in quadlets/heretek-ghidra-mcp.container
+OBSERVED: grep confirms line 23 Image=bethington/ghidra-mcp-headless:latest (+ line 6 comment)
+COMMAND: bun run scripts/verify-stack.ts
+OBSERVED:
+  FAIL [NO_FLOATING_TAGS] quadlets/heretek-ghidra-mcp.container:23: quadlet image not pinned: bethington/ghidra-mcp-headless:latest
+  verify-stack: 1 violation(s) in 13 file(s) — FAIL CLOSED
+EXIT: 1 (correct rule NO_FLOATING_TAGS)
+RESTORED: git checkout -- quadlets/heretek-ghidra-mcp.container (RESTORE exit 0; git status --short for that file empty; Image= back to v6.0.0; verifier re-run PASS exit 0)
+
+## Sabotage B (NO_DOCKER_SOCK) — 2026-10-16 UTC
+COMMAND: python3 JSON-append mount "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind,consistency=cached,Z" to devcontainers/polyglot-dev/.devcontainer.json mounts[]
+OBSERVED: grep confirms line 12 contains /var/run/docker.sock
+COMMAND: bun run scripts/verify-stack.ts
+OBSERVED:
+  FAIL [NO_DOCKER_SOCK] devcontainers/polyglot-dev/.devcontainer.json:12: socket mount reference forbidden: "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind,consistency=cached,Z"
+  FAIL [NO_DOCKER_SOCK] devcontainers/polyglot-dev/.devcontainer.json:1: devcontainer mounts a container socket
+  verify-stack: 2 violation(s) in 13 file(s) — FAIL CLOSED
+EXIT: 1 (correct rule NO_DOCKER_SOCK)
+RESTORED: git checkout -- devcontainers/polyglot-dev/.devcontainer.json (RESTORE exit 0; git status --short for that file empty; verifier re-run PASS exit 0)
+
+## Sabotage C — functional KVM red-proof (no mutation) — 2026-10-16 UTC
+COMMAND: bash scripts/heretek-exec.sh --dry-run echo hello
+OBSERVED: full dry-run output contains 0 occurrences of /dev/kvm (grep -c = 0); status line reads "kvm: disabled (accelerator node not passed through)"
+EXIT: 0 (absence proven — would FAIL the KVM-present assertion)
+COMMAND: bash scripts/heretek-exec.sh --dry-run --kvm echo hello
+OBSERVED: status line reads "kvm: enabled (/dev/kvm bound into the sandbox)"; bwrap argv contains "--dev-bind /dev/kvm /dev/kvm --setenv HERETEK_ALLOW_KVM 1"; grep -c /dev/kvm = 3
+EXIT: 0 (presence proven)
+ASSERT: without --kvm NO /dev/kvm, with --kvm /dev/kvm present -> PASS (functional distinction proven, no file mutation needed)
+
+## 3. Zero-stub scan (Wave 3 scope)
+COMMAND: grep -rin "TODO|FIXME|XXX|not implemented|dummy|return true" devcontainers/ quadlets/ scripts/heretek-exec.sh scripts/heretek-box-ctl.sh scripts/accept/wave-3.sh test/scripts-ctl.test.ts
+OBSERVED: STUB_SCAN_CLEAN: no stubs found -> PASS
+COMMAND: grep -rn ":latest" devcontainers/polyglot-dev/.devcontainer.json devcontainers/ai-cuda-dev/.devcontainer.json quadlets/*.container
+OBSERVED: NO_LATEST_IN_WAVE3_PROD -> PASS
+COMMAND: grep -rn "docker.sock|podman.sock" devcontainers/ quadlets/
+OBSERVED: NO_SOCK_IN_WAVE3_PROD -> PASS
+COMMAND: grep -rin banned tokens (firecrawl|RFingAdam|bytebot|0xflux/ghidra-mcp|pentagi) across devcontainers/ quadlets/ scripts/ compose/
+OBSERVED: hits ONLY in scripts/verify-stack.ts lines 14-16,90 (Wave 1 verifier's own banned-token rule list + doc comment) — no Wave 3 production file contains banned images -> PASS
+
+## 4. Final state
+COMMAND: git status --short
+OBSERVED: (empty except untracked docs/evidence/wave-3/red-proofs.log at time of check; all sabotaged files restored — pre-log status was completely empty)
+COMMAND: bun run scripts/verify-stack.ts (post-restore)
+OBSERVED: PASS: all security contracts hold across 13 scanned file(s).
+EXIT: 0
+
+## QA VERDICT: PASS
+- All green-path checks exit 0 (make check, make accept incl. wave-1/2/3.sh, bun test 75 pass, verifier 13 files).
+- Functional: bwrap+landrun+mise chain present; list-profiles complete; box-ctl verify 0; quadlets socket-activated.
+- Sabotage A exits 1 with NO_FLOATING_TAGS; Sabotage B exits 1 with NO_DOCKER_SOCK; Sabotage C proves KVM on/off distinction.
+- All mutations restored via git checkout --; verifier green after restore.
