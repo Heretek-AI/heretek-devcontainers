@@ -1,0 +1,241 @@
+# Wave 2 QA Red-Proof Evidence Log — `wave-2-specialist-profiles`
+- **Worktree:** `/home/john/Projects/Heretek-AI-Rebuild/heretek-devcontainers/worktrees/wave-2`
+- **Branch:** `wave-2-specialist-profiles`
+- **Date (UTC):** 2026-10-16T01:31:01Z
+- **QA Agent:** `agency-qa` (Muse Spark 1.3 Contributor)
+- **Spec:** `docs/prompts/SPEC.md` §2.2, `AGENTS.md` §§0.4–0.5, `docs/prompts/verify-stage.md` §1
+- **Edit method note:** native `edit` attempted for sabotage A and DENIED
+  (`Permission denied: edit`); per `verify-stage.md` §1.2 NOTE, fell back to
+  `python3` single-line mutation via `shell` for sabotages A–C, restored each
+  with `git checkout -- <file>`. No other file viewing/editing used shell.
+
+---
+
+## GREEN PATH (clean tree, all exit 0)
+
+### `make check` → EXIT 0
+```
+==> bun run scripts/verify-stack.ts
+PASS: all security contracts hold across 8 scanned file(s).
+==> bun test
+bun test v1.4.2 (744846f84)
+
+ 32 pass
+ 0 fail
+ 307 expect() calls
+Ran 32 tests across 2 files. [20.00ms]
+EXIT=0
+```
+
+### `bash scripts/accept/wave-1.sh` → EXIT 0 (no regression)
+```
+==> [wave-1] required files exist
+  ok: .env.example
+  ok: docker-compose.yml
+  ok: compose/core.yml
+  ok: compose/bifrost.yaml
+  ok: compose/agentgateway.yaml
+  ok: scripts/verify-stack.ts
+  ok: test/compose-contracts.test.ts
+  ok: test/bifrost-config.test.ts
+==> [wave-1] .env.example carries CHANGEME_ template tokens
+==> [wave-1] root compose uses include:
+==> [wave-1] core.yml defines 3 pinned services
+==> [wave-1] bifrost.yaml configures session affinity
+==> [wave-1] static verifier passes (fail-closed)
+PASS: all security contracts hold across 8 scanned file(s).
+==> [wave-1] unit tests pass
+ 32 pass, 0 fail, 307 expect() calls, Ran 32 tests across 2 files.
+WAVE-1 ACCEPT PASS
+EXIT=0
+```
+
+### `bash scripts/accept/wave-2.sh` → EXIT 0
+```
+==> [wave-2] required profile files exist
+  ok: compose/profile-appsec.yml
+  ok: compose/profile-android.yml
+  ok: compose/profile-game.yml
+  ok: compose/profile-research.yml
+  ok: test/compose-contracts.test.ts
+==> [wave-2] appsec profile defines 4 pinned services
+==> [wave-2] android profile defines 3 pinned services
+==> [wave-2] game profile defines 2 pinned services
+==> [wave-2] research profile defines 3 pinned services
+==> [wave-2] root compose includes all 4 specialist profiles
+==> [wave-2] static verifier passes (fail-closed, 8 files)
+PASS: all security contracts hold across 8 scanned file(s).
+==> [wave-2] unit tests pass
+ 32 pass, 0 fail, 307 expect() calls
+==> [wave-2] wave-1 gate still green (no regression)
+WAVE-1 ACCEPT PASS
+WAVE-2 ACCEPT PASS
+EXIT=0
+```
+
+### `bun test` → EXIT 0
+```
+bun test v1.4.2 (744846f84)
+ 32 pass
+ 0 fail
+ 307 expect() calls
+Ran 32 tests across 2 files. [20.00ms]
+EXIT=0
+```
+(32 tests ≥ 30 required.)
+
+### `bun run scripts/verify-stack.ts` → EXIT 0
+```
+PASS: all security contracts hold across 8 scanned file(s).
+EXIT=0
+```
+(8 files scanned as expected.)
+
+---
+
+## Sabotage A (NO_DOCKER_SOCK) — 2026-10-16 UTC
+COMMAND:
+```
+python3 -c "insert '      - /var/run/docker.sock:/var/run/docker.sock' after '      - ./data/ghidra-mcp:/data:Z' in compose/profile-appsec.yml"
+grep -n "docker.sock" compose/profile-appsec.yml
+bun run scripts/verify-stack.ts; echo "EXIT=$?"
+```
+MUTATION: under `ghidra-mcp` `volumes:`, added line:
+```
+      - /var/run/docker.sock:/var/run/docker.sock
+```
+OBSERVED (FAIL CLOSED, exit 1):
+```
+24:      - /var/run/docker.sock:/var/run/docker.sock
+---
+FAIL [NO_DOCKER_SOCK] compose/profile-appsec.yml:24: socket mount reference forbidden: - /var/run/docker.sock:/var/run/docker.sock
+FAIL [SELINUX_VOLUME_LABELS] compose/profile-appsec.yml:24: service "ghidra-mcp" bind mount missing :z/:Z/:ro,Z SELinux label: /var/run/docker.sock:/var/run/docker.sock
+verify-stack: 2 violation(s) in 8 file(s) — FAIL CLOSED
+EXIT=1
+```
+Primary rule `NO_DOCKER_SOCK` fired as mandated (secondary `SELINUX_VOLUME_LABELS`
+also fired on the same line — correct, that bind lacks a label). Check is NOT vacuous.
+RESTORED:
+```
+git checkout -- compose/profile-appsec.yml  (RESTORE_EXIT=0)
+git status --short → clean (no output for this file)
+grep -c "docker.sock" compose/profile-appsec.yml → 0 (clean)
+bun run scripts/verify-stack.ts → PASS: all security contracts hold across 8 scanned file(s). EXIT=0
+```
+
+## Sabotage B (NO_AGPL_IN_DEV_OR_GAME + NO_FLOATING_TAGS) — 2026-10-16 UTC
+COMMAND:
+```
+python3 -c "replace 'ghcr.io/sandraschi/blender-mcp:v1.2.0' with 'RFingAdam/mcp-blender:latest' in compose/profile-game.yml"
+grep -n "blender" compose/profile-game.yml
+bun run scripts/verify-stack.ts; echo "EXIT=$?"
+```
+MUTATION: `blender-mcp` image line changed:
+```
+-    image: ghcr.io/sandraschi/blender-mcp:v1.2.0
++    image: RFingAdam/mcp-blender:latest
+```
+OBSERVED (FAIL CLOSED, exit 1):
+```
+29:  blender-mcp:
+30:    image: RFingAdam/mcp-blender:latest
+---
+FAIL [NO_AGPL_IN_DEV_OR_GAME] compose/profile-game.yml:30: banned AGPL/root-escape image: RFingAdam/mcp-blender:latest
+FAIL [NO_FLOATING_TAGS] compose/profile-game.yml:30: floating/empty image tag forbidden: RFingAdam/mcp-blender:latest
+verify-stack: 2 violation(s) in 8 file(s) — FAIL CLOSED
+EXIT=1
+```
+Both `NO_AGPL_IN_DEV_OR_GAME` and `NO_FLOATING_TAGS` fired on the single
+mutated line (either alone satisfies the mandate; both firing proves depth).
+Check is NOT vacuous.
+RESTORED:
+```
+git checkout -- compose/profile-game.yml  (RESTORE_EXIT=0)
+git status --short → clean
+grep image compose/profile-game.yml → ghcr.io/tugcantopaloglu/godot-mcp:v3.1.0 + ghcr.io/sandraschi/blender-mcp:v1.2.0 (pinned, correct)
+bun run scripts/verify-stack.ts → PASS: all security contracts hold across 8 scanned file(s). EXIT=0
+```
+
+## Sabotage C (LOOPBACK_PORTS_ONLY) — 2026-10-16 UTC
+COMMAND:
+```
+python3 -c "replace '127.0.0.1:8888:8080' with '0.0.0.0:8888:8080' in compose/profile-research.yml"
+grep -n "8888" compose/profile-research.yml
+bun run scripts/verify-stack.ts; echo "EXIT=$?"
+```
+MUTATION: `searxng` port line changed:
+```
+-      - "127.0.0.1:8888:8080"
++      - "0.0.0.0:8888:8080"
+```
+OBSERVED (FAIL CLOSED, exit 1):
+```
+18:      BASE_URL: http://127.0.0.1:8888/
+20:      - "0.0.0.0:8888:8080"
+---
+FAIL [LOOPBACK_PORTS_ONLY] compose/profile-research.yml:20: service "searxng" port must bind 127.0.0.1:<host>:<container>, got: 0.0.0.0:8888:8080
+verify-stack: 1 violation(s) in 8 file(s) — FAIL CLOSED
+EXIT=1
+```
+Exact rule `LOOPBACK_PORTS_ONLY` with file:line `profile-research.yml:20`.
+Critically, the verifier did NOT false-positive on line 18
+(`BASE_URL: http://127.0.0.1:8888/` — not a published port), proving port-scope precision.
+Check is NOT vacuous.
+RESTORED:
+```
+git checkout -- compose/profile-research.yml  (RESTORE_EXIT=0)
+git status --short → clean
+grep -n "8888" → line 20 back to "127.0.0.1:8888:8080"
+bun run scripts/verify-stack.ts → PASS: all security contracts hold across 8 scanned file(s). EXIT=0
+```
+
+---
+
+## ZERO-STUB SCAN — 2026-10-16 UTC
+COMMAND:
+```
+grep -rn -i "TODO\|FIXME\|XXX\|HACK\|placeholder\|dummy\|stub\|not implemented\|to be done" compose/profile-appsec.yml compose/profile-android.yml compose/profile-game.yml compose/profile-research.yml test/compose-contracts.test.ts scripts/accept/wave-2.sh
+```
+OBSERVED: `CLEAN: no TODO/FIXME/placeholder/dummy hits` (grep exit 1, no matches).
+All 12 Wave 2 services declare complete image/user/ports/volumes/caps/security_opt/healthcheck.
+
+## 0.0.0.0 DISTINCTION (SPEC-mandated, NOT a fail) — 2026-10-16 UTC
+COMMAND: `grep -rn "0\.0\.0\.0" compose/`
+OBSERVED: exactly ONE occurrence in the entire tree:
+```
+compose/profile-appsec.yml:40:    command: ["r2mcp", "-H", "0.0.0.0:8765", "-r"]
+```
+VERDICT: NOT a violation — this is the SPEC §2.2-mandated container-internal
+listen address for `radare2-mcp` (`r2mcp -H 0.0.0.0:8765 -r` read-only mode).
+The PUBLISHED port for the same service is loopback-only:
+```
+compose/profile-appsec.yml:42:      - "127.0.0.1:8765:8765"
+```
+The verifier correctly distinguishes the two (green on clean tree proves it);
+the narrowed Wave 1 test assertion (ports-block-only scan, per wave-2.md
+§Self-audit) matches the verifier's own scoping. Do NOT flag as fail.
+
+## SUPPORTING CLEAN-TREE GREPS — 2026-10-16 UTC
+- Published `ports:` blocks: all 12 Wave 2 mappings are `127.0.0.1:<host>:<container>`
+  (8089, 8765, 8766, 8767, 6080, 5555, 8770, 8771, 8780, 8781, 8888:8080, 11235, 8790).
+- Banned images (`firecrawl|RFingAdam|bytebot|0xflux|pentagi` in `compose/`): CLEAN, none.
+- Floating tags (`:latest` in `compose/`): CLEAN, none.
+- Socket mounts (`docker.sock|podman.sock` in `compose/`): CLEAN, none.
+
+---
+
+## FINAL RESTORATION VERIFICATION — 2026-10-16 UTC
+```
+git status --short → (empty, completely clean)
+git diff --stat → (empty)
+bun run scripts/verify-stack.ts → PASS: all security contracts hold across 8 scanned file(s). EXIT=0
+```
+
+## QA VERDICT
+- Green path: `make check` 0, `wave-1.sh` 0, `wave-2.sh` 0, `bun test` 32 pass 0 fail, verifier 0 (8 files). PASS.
+- Red proofs: Sabotage A exit 1 (NO_DOCKER_SOCK), Sabotage B exit 1
+  (NO_AGPL_IN_DEV_OR_GAME + NO_FLOATING_TAGS), Sabotage C exit 1
+  (LOOPBACK_PORTS_ONLY). All restored via `git checkout --`, tree clean, verifier 0. PASS.
+- Zero stubs: clean. 0.0.0.0 single occurrence documented as SPEC-mandated internal listen. PASS.
+- **QA: PASS** — evidence complete, sabotages non-vacuous, tree clean.
+- red-proofs.log left UNCOMMITTED per instructions (only `docs/evidence/*` modified, no commit, no push).
