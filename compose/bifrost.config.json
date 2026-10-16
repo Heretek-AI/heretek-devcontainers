@@ -1,0 +1,79 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "client": {
+    "enforce_auth_on_inference": true
+  },
+  "providers": {
+    "opencode-go": {
+      "keys": [
+        {
+          "name": "opencode-local",
+          "value": "env.BIFROST_API_KEY",
+          "models": ["default"],
+          "weight": 1.0
+        }
+      ],
+      "network_config": {
+        "base_url": "http://host.docker.internal:11434",
+        "allow_private_network": true
+      }
+    },
+    "openrouter": {
+      "keys": [
+        {
+          "name": "openrouter-cloud",
+          "value": "env.OPENROUTER_API_KEY",
+          "models": ["anthropic/claude-default", "openai/gpt-default"],
+          "weight": 1.0
+        }
+      ]
+    },
+    "vllm": {
+      "keys": [
+        {
+          "name": "local-vllm",
+          "value": "",
+          "models": ["hosted-llm"],
+          "weight": 1.0,
+          "vllm_key_config": {
+            "url": "http://host.docker.internal:8000",
+            "model_name": "hosted-llm"
+          }
+        }
+      ],
+      "network_config": {
+        "allow_private_network": true
+      }
+    }
+  },
+  "governance": {
+    "auth_config": {
+      "is_enabled": true,
+      "admin_username": "env.BIFROST_ADMIN_USERNAME",
+      "admin_password": "env.BIFROST_ADMIN_PASSWORD"
+    },
+    "virtual_keys": [
+      {
+        "id": "agentgateway",
+        "name": "agentgateway",
+        "description": "Sent by agentgateway's llm-default route as x-bf-vk",
+        "value": "env.BIFROST_VIRTUAL_KEY",
+        "is_active": true,
+        "allow_all_providers": true
+      }
+    ],
+    "routing_rules": [
+      {
+        "id": "default-llm",
+        "name": "default-llm",
+        "description": "3-tier failover: opencode-go (local) -> openrouter (cloud) -> vllm (on-box)",
+        "enabled": true,
+        "cel_expression": "true",
+        "targets": [{ "provider": "opencode-go", "weight": 1.0 }],
+        "fallbacks": ["openrouter/anthropic/claude-default", "vllm/hosted-llm"],
+        "scope": "global",
+        "priority": 0
+      }
+    ]
+  }
+}

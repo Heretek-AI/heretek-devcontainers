@@ -1,0 +1,12 @@
+services:
+  web:
+    image: localhost/heretek/web
+    build:
+      context: ../images/web
+    ports:
+      - "127.0.0.1:4222:4222"
+    volumes:
+      - ./conf:/etc/web:ro,Z
+    cap_drop: [ALL]
+    security_opt:
+      - "no-new-privileges:true"

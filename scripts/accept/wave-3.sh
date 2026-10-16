@@ -7,6 +7,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
 fail() {
   echo "WAVE-3 ACCEPT FAIL: $1" >&2
   exit 1
@@ -23,6 +26,14 @@ for f in \
   quadlets/heretek-android-kvm.container \
   quadlets/heretek-ghidra-mcp.container \
   quadlets/heretek-blender-mcp.container \
+  quadlets/heretek-android-kvm-vnc-proxy.socket \
+  quadlets/heretek-android-kvm-vnc-proxy.service \
+  quadlets/heretek-android-kvm-adb-proxy.socket \
+  quadlets/heretek-android-kvm-adb-proxy.service \
+  quadlets/heretek-ghidra-mcp-proxy.socket \
+  quadlets/heretek-ghidra-mcp-proxy.service \
+  quadlets/heretek-blender-mcp-proxy.socket \
+  quadlets/heretek-blender-mcp-proxy.service \
   scripts/heretek-exec.sh \
   scripts/heretek-box-ctl.sh \
   test/scripts-ctl.test.ts \
@@ -59,12 +70,12 @@ grep -q "FROM debian:trixie" devcontainers/headless-wayland-desktop/Dockerfile |
 grep -q "at-spi2-core" devcontainers/headless-wayland-desktop/Dockerfile || fail "Dockerfile missing at-spi2-core"
 
 echo "==> [wave-3] heretek-exec --dry-run exposes the bwrap+landrun+mise chain"
-bash scripts/heretek-exec.sh --dry-run -- echo hello > /tmp/opencode/heretek-exec-dry.txt || fail "heretek-exec --dry-run exited non-zero"
-grep -q "bwrap" /tmp/opencode/heretek-exec-dry.txt || fail "dry-run missing bwrap stage"
-grep -q "landrun" /tmp/opencode/heretek-exec-dry.txt || fail "dry-run missing landrun stage"
-grep -q "mise exec" /tmp/opencode/heretek-exec-dry.txt || fail "dry-run missing mise exec stage"
-bash scripts/heretek-exec.sh --dry-run --kvm -- true > /tmp/opencode/heretek-exec-kvm.txt || fail "heretek-exec --dry-run --kvm exited non-zero"
-grep -q "/dev/kvm" /tmp/opencode/heretek-exec-kvm.txt || fail "dry-run --kvm missing /dev/kvm bind"
+bash scripts/heretek-exec.sh --dry-run -- echo hello > "$WORK"/heretek-exec-dry.txt || fail "heretek-exec --dry-run exited non-zero"
+grep -q "bwrap" "$WORK"/heretek-exec-dry.txt || fail "dry-run missing bwrap stage"
+grep -q "landrun" "$WORK"/heretek-exec-dry.txt || fail "dry-run missing landrun stage"
+grep -q "mise exec" "$WORK"/heretek-exec-dry.txt || fail "dry-run missing mise exec stage"
+bash scripts/heretek-exec.sh --dry-run --kvm -- true > "$WORK"/heretek-exec-kvm.txt || fail "heretek-exec --dry-run --kvm exited non-zero"
+grep -q "/dev/kvm" "$WORK"/heretek-exec-kvm.txt || fail "dry-run --kvm missing /dev/kvm bind"
 
 echo "==> [wave-3] box-ctl lists all 6 profiles"
 profiles="$(bash scripts/heretek-box-ctl.sh list-profiles)" || fail "box-ctl list-profiles exited non-zero"
@@ -75,16 +86,26 @@ for p in core appsec android game research all; do
 done
 bash scripts/heretek-box-ctl.sh up bogus-profile >/dev/null 2>&1 && fail "box-ctl up accepted an unknown profile" || true
 
-echo "==> [wave-3] quadlets socket-activate with pinned images on loopback ports"
+echo "==> [wave-3] quadlets are socket-activated, confined, pinned and loopback-only"
 for f in quadlets/*.container; do
+  unit="$(basename "$f" .container).service"
   grep -q "StopWhenUnneeded=true" "$f" || fail "$f missing StopWhenUnneeded=true"
+  grep -q "^\[Install\]" "$f" && fail "$f has an [Install] section (would start at login)"
+  grep -qE "^SecurityLabel(Type|Disable)=" "$f" && fail "$f opts out of SELinux confinement"
   grep -qE "^Image=.*:.+" "$f" || fail "$f has an unpinned Image="
   grep -q "PublishPort=127.0.0.1:" "$f" || fail "$f missing loopback PublishPort="
+  grep -lE "^Requires=.*$unit" quadlets/*-proxy.service >/dev/null || fail "no proxy service Requires= $unit"
   echo "  ok: $f"
 done
-grep -q "Image=budtmo/docker-android:emulator_14.0" quadlets/heretek-android-kvm.container || fail "android quadlet image drifted"
-grep -q "Image=bethington/ghidra-mcp-headless:v6.0.0" quadlets/heretek-ghidra-mcp.container || fail "ghidra quadlet image drifted"
-grep -q "Image=ghcr.io/sandraschi/blender-mcp:v1.2.0" quadlets/heretek-blender-mcp.container || fail "blender quadlet image drifted"
+for f in quadlets/*.socket; do
+  grep -q "^ListenStream=127.0.0.1:" "$f" || fail "$f must listen on 127.0.0.1"
+  [ -f "${f%.socket}.service" ] || fail "$f has no matching proxy service"
+  grep -q "systemd-socket-proxyd --exit-idle-time=" "${f%.socket}.service" || fail "${f%.socket}.service must exit when idle"
+  echo "  ok: $f"
+done
+grep -q "Image=budtmo/docker-android:emulator_14.0_v3.8.0-p1" quadlets/heretek-android-kvm.container || fail "android quadlet image drifted"
+grep -q "Image=localhost/heretek/ghidra-mcp:6.0.0" quadlets/heretek-ghidra-mcp.container || fail "ghidra quadlet image drifted"
+grep -q "Image=localhost/heretek/blender-mcp:0.11.1" quadlets/heretek-blender-mcp.container || fail "blender quadlet image drifted"
 
 echo "==> [wave-3] static verifier passes (fail-closed)"
 bun run scripts/verify-stack.ts || fail "verify-stack.ts exited non-zero"

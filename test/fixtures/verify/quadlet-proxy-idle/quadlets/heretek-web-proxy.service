@@ -1,0 +1,6 @@
+[Unit]
+Requires=heretek-web.service heretek-web-proxy.socket
+After=heretek-web.service heretek-web-proxy.socket
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:18080

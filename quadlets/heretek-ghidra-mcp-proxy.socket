@@ -1,0 +1,14 @@
+# quadlets/heretek-ghidra-mcp-proxy.socket — activation socket for heretek-ghidra-mcp
+#
+# Listens on the loopback-only port compose also uses (127.0.0.1:8089) and
+# activates heretek-ghidra-mcp-proxy.service on the first connection.
+# This is the only Ghidra unit that is enabled (WantedBy=sockets.target).
+
+[Unit]
+Description=Heretek Ghidra MCP activation socket (127.0.0.1:8089)
+
+[Socket]
+ListenStream=127.0.0.1:8089
+
+[Install]
+WantedBy=sockets.target

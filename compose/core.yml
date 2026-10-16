@@ -7,22 +7,35 @@ name: heretek-core
 
 services:
   bifrost:
-    image: ghcr.io/maximhq/bifrost:v1.0.0
+    image: ghcr.io/maximhq/bifrost:v2.3.0
     user: "1000:1000"
     restart: unless-stopped
-    command: ["-config", "/app/config.yaml"]
+    # Bifrost v2 has no `-config` flag: the image entrypoint runs
+    # `/app/main -app-dir $APP_DIR` (APP_DIR=/app/data), which loads
+    # $APP_DIR/config.json at startup and listens on 8080. Provider keys in
+    # that file are `env.X` references resolved from this environment.
     environment:
       BIFROST_API_KEY: ${BIFROST_API_KEY:?BIFROST_API_KEY is required}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?OPENROUTER_API_KEY is required}
-    ports:
-      - "127.0.0.1:8080:8080"
+      # Inference needs this virtual key (agentgateway sends it as x-bf-vk);
+      # the admin pair guards the management API and dashboard.
+      BIFROST_VIRTUAL_KEY: ${BIFROST_VIRTUAL_KEY:?BIFROST_VIRTUAL_KEY is required}
+      BIFROST_ADMIN_USERNAME: ${BIFROST_ADMIN_USERNAME:?BIFROST_ADMIN_USERNAME is required}
+      BIFROST_ADMIN_PASSWORD: ${BIFROST_ADMIN_PASSWORD:?BIFROST_ADMIN_PASSWORD is required}
+    # No published port and only the `llm` network: agentgateway is the one
+    # caller that can reach Bifrost.
+    networks: [llm]
     volumes:
-      - ./bifrost.yaml:/app/config.yaml:ro,Z
+      # APP_DIR stays a writable volume (config.db, logs.db); config.json is
+      # bind-mounted read-only over it from compose/bifrost.config.json
+      # (providers + the 3-tier failover routing rule).
+      - bifrost-data:/app/data
+      - ./bifrost.config.json:/app/data/config.json:ro,Z
     cap_drop: [ALL]
     security_opt:
       - "no-new-privileges:true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -31,12 +44,19 @@ services:
     image: ghcr.io/agentgateway/agentgateway:v1.6.0
     user: "1000:1000"
     restart: unless-stopped
-    command: ["serve", "--config", "/etc/agentgateway.yaml"]
+    # The image ENTRYPOINT is /app/agentgateway; `-f` loads the standalone
+    # config file (validated by `make validate-gateway`).
+    command: ["-f", "/etc/agentgateway.yaml"]
+    environment:
+      # API keys for the two gateway roles; agentgateway refuses to start when
+      # a referenced variable is unset (fail closed).
+      AGENTGATEWAY_ADMIN_KEY: ${AGENTGATEWAY_ADMIN_KEY:?AGENTGATEWAY_ADMIN_KEY is required}
+      AGENTGATEWAY_AGENT_KEY: ${AGENTGATEWAY_AGENT_KEY:?AGENTGATEWAY_AGENT_KEY is required}
+      BIFROST_VIRTUAL_KEY: ${BIFROST_VIRTUAL_KEY:?BIFROST_VIRTUAL_KEY is required}
     depends_on:
       bifrost:
         condition: service_started
-      nats:
-        condition: service_started
+    networks: [default, llm]
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
@@ -44,11 +64,8 @@ services:
     cap_drop: [ALL]
     security_opt:
       - "no-new-privileges:true"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+    # No healthcheck: the image is distroless (no shell, no wget/curl) and
+    # agentgateway has no self-probe subcommand.
 
   nats:
     image: nats:2.15.1-alpine
@@ -70,5 +87,12 @@ services:
       retries: 3
 
 volumes:
+  bifrost-data:
+    driver: local
   nats-data:
     driver: local
+
+networks:
+  # Bifrost's only network, shared with agentgateway alone. Not `internal`:
+  # Bifrost still needs egress to OpenRouter.
+  llm: {}

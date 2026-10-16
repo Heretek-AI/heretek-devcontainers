@@ -28,10 +28,10 @@ echo "==> [wave-2] appsec profile defines 4 pinned services"
 for svc in ghidra-mcp radare2-mcp rea-mcp mdb-mcp; do
   grep -q "^  $svc:" compose/profile-appsec.yml || fail "profile-appsec.yml missing service: $svc"
 done
-grep -q "bethington/ghidra-mcp-headless:v6.0.0" compose/profile-appsec.yml || fail "ghidra-mcp image not pinned"
-grep -q "ghcr.io/radareorg/radare2-mcp:1.8.8" compose/profile-appsec.yml || fail "radare2-mcp image not pinned"
-grep -q "ghcr.io/morluto/rea:6.5.0" compose/profile-appsec.yml || fail "rea-mcp image not pinned"
-grep -q "ghcr.io/smadi0x86/mdb-mcp:1.2.0" compose/profile-appsec.yml || fail "mdb-mcp image not pinned"
+grep -q "localhost/heretek/ghidra-mcp:6.0.0" compose/profile-appsec.yml || fail "ghidra-mcp image not pinned"
+grep -q "localhost/heretek/radare2-mcp:1.9.0" compose/profile-appsec.yml || fail "radare2-mcp image not pinned"
+grep -q "localhost/heretek/rea-mcp:6.5.0" compose/profile-appsec.yml || fail "rea-mcp image not pinned"
+grep -q "localhost/heretek/mdb-mcp:0.2.0-5d03b25" compose/profile-appsec.yml || fail "mdb-mcp image not pinned"
 grep -q "127.0.0.1:8089:8089" compose/profile-appsec.yml || fail "ghidra-mcp port not loopback"
 grep -q "127.0.0.1:8765:8765" compose/profile-appsec.yml || fail "radare2-mcp port not loopback"
 grep -q "127.0.0.1:8766:8766" compose/profile-appsec.yml || fail "rea-mcp port not loopback"
@@ -43,9 +43,9 @@ echo "==> [wave-2] android profile defines 3 pinned services"
 for svc in android-kvm adb-mcp maestro-mcp; do
   grep -q "^  $svc:" compose/profile-android.yml || fail "profile-android.yml missing service: $svc"
 done
-grep -q "budtmo/docker-android:emulator_14.0" compose/profile-android.yml || fail "android-kvm image not pinned"
-grep -q "ghcr.io/iksnerd/adb-mcp:v1.4.0" compose/profile-android.yml || fail "adb-mcp image not pinned"
-grep -q "ghcr.io/mobile-dev-inc/maestro:v1.39.8" compose/profile-android.yml || fail "maestro-mcp image not pinned"
+grep -q "budtmo/docker-android:emulator_14.0_v3.8.0-p1" compose/profile-android.yml || fail "android-kvm image not pinned"
+grep -q "localhost/heretek/adb-mcp:0.23.0" compose/profile-android.yml || fail "adb-mcp image not pinned"
+grep -q "localhost/heretek/maestro-mcp:2.11.0" compose/profile-android.yml || fail "maestro-mcp image not pinned"
 grep -q "/dev/kvm:/dev/kvm" compose/profile-android.yml || fail "android-kvm missing /dev/kvm passthrough"
 grep -q "127.0.0.1:6080:6080" compose/profile-android.yml || fail "android-kvm VNC port not loopback"
 grep -q "127.0.0.1:5555:5555" compose/profile-android.yml || fail "android-kvm ADB port not loopback"
@@ -56,8 +56,8 @@ echo "==> [wave-2] game profile defines 2 pinned services"
 for svc in godot-mcp blender-mcp; do
   grep -q "^  $svc:" compose/profile-game.yml || fail "profile-game.yml missing service: $svc"
 done
-grep -q "ghcr.io/tugcantopaloglu/godot-mcp:v3.1.0" compose/profile-game.yml || fail "godot-mcp image not pinned"
-grep -q "ghcr.io/sandraschi/blender-mcp:v1.2.0" compose/profile-game.yml || fail "blender-mcp image not pinned"
+grep -q "localhost/heretek/godot-mcp:3.1.0" compose/profile-game.yml || fail "godot-mcp image not pinned"
+grep -q "localhost/heretek/blender-mcp:0.11.1" compose/profile-game.yml || fail "blender-mcp image not pinned"
 grep -q "127.0.0.1:8780:8780" compose/profile-game.yml || fail "godot-mcp port not loopback"
 grep -q "127.0.0.1:8781:8781" compose/profile-game.yml || fail "blender-mcp port not loopback"
 
@@ -65,13 +65,18 @@ echo "==> [wave-2] research profile defines 3 pinned services"
 for svc in searxng crawl4ai computer-use-linux; do
   grep -q "^  $svc:" compose/profile-research.yml || fail "profile-research.yml missing service: $svc"
 done
-grep -q "searxng/searxng:2026.10.14" compose/profile-research.yml || fail "searxng image not pinned"
+grep -q "searxng/searxng:2026.10.16-0ce72dd2c" compose/profile-research.yml || fail "searxng image not pinned"
 grep -q "unclecode/crawl4ai:0.9.5" compose/profile-research.yml || fail "crawl4ai image not pinned"
-grep -q "ghcr.io/agent-sh/computer-use-linux:v0.9.4" compose/profile-research.yml || fail "computer-use-linux image not pinned"
+grep -q "localhost/heretek/computer-use-linux:0.7.17" compose/profile-research.yml || fail "computer-use-linux image not pinned"
 grep -q "127.0.0.1:8888:8080" compose/profile-research.yml || fail "searxng port not loopback"
 grep -q "127.0.0.1:11235:11235" compose/profile-research.yml || fail "crawl4ai port not loopback"
 grep -q "127.0.0.1:8790:8790" compose/profile-research.yml || fail "computer-use-linux port not loopback"
 grep -q 'shm_size: "1g"' compose/profile-research.yml || fail "crawl4ai missing shm_size 1g"
+
+echo "==> [wave-2] every local build has its Dockerfile"
+for svc in ghidra-mcp radare2-mcp rea-mcp mdb-mcp adb-mcp maestro-mcp godot-mcp blender-mcp computer-use-linux; do
+  [ -f "images/$svc/Dockerfile" ] || fail "missing images/$svc/Dockerfile"
+done
 
 echo "==> [wave-2] root compose includes all 4 specialist profiles"
 for p in profile-appsec.yml profile-android.yml profile-game.yml profile-research.yml; do

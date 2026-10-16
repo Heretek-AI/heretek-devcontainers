@@ -1,19 +1,20 @@
 # devcontainers/headless-wayland-desktop/Dockerfile — headless Sway + AT-SPI2 desktop (Wave 3)
 #
-# Debian trixie-slim base (pinned, never floating) with a headless Sway
+# Debian trixie-slim base (pinned to a dated release, never floating) with a headless Sway
 # compositor, AT-SPI2 accessibility bus, and ydotool for synthetic input.
 # Pairs at runtime with the pinned computer-use-linux agent image noted below
 # (see compose/profile-research.yml `computer-use-linux` service), which
 # consumes this desktop over the headless Wayland socket.
 #
-# Runtime peer (pinned, Apache-2.0/MIT stack — no AGPL tooling):
-#   ghcr.io/agent-sh/computer-use-linux:v0.9.4
+# Runtime peer (pinned local build of the MIT agent-sh/computer-use-linux
+# v0.7.17 release — no AGPL tooling; see images/computer-use-linux/Dockerfile):
+#   localhost/heretek/computer-use-linux:0.7.17
 #
 # Security posture: non-root `agent` user (uid 1000), no container-socket
 # mounts, no privileged capabilities required (KVM passthrough, where needed,
 # is granted by the orchestrator via device mapping, not by this image).
 
-FROM debian:trixie-slim
+FROM debian:trixie-20261005-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     WLR_BACKENDS=headless \

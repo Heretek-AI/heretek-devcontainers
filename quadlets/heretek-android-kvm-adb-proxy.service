@@ -1,0 +1,16 @@
+# quadlets/heretek-android-kvm-adb-proxy.service — ADB socket proxy for heretek-android-kvm
+#
+# Started by heretek-android-kvm-adb-proxy.socket. Pulls up the emulator unit
+# (Requires=/After=; Notify=healthy there delays "started" until noVNC
+# answers) and forwards connections to the container's loopback port. It exits
+# after 15 idle minutes (--exit-idle-time, systemd-socket-proxyd's idle
+# timeout); once both android proxies are gone, StopWhenUnneeded=true stops
+# the emulator.
+
+[Unit]
+Description=Heretek Android KVM ADB socket proxy (exits when idle)
+Requires=heretek-android-kvm.service heretek-android-kvm-adb-proxy.socket
+After=heretek-android-kvm.service heretek-android-kvm-adb-proxy.socket
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=15min 127.0.0.1:15555

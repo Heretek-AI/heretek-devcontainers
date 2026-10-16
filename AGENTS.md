@@ -118,7 +118,7 @@ No `VERDICT: PASS`, no merge. No exceptions.
 ├── tsconfig.json
 ├── docker-compose.yml              # Root compose using `include:` for compose/core.yml + 4 specialist profiles
 ├── compose/
-│   ├── core.yml                    # Profile `core`: maximhq/bifrost:v1.0.0 (:8080), agentgateway:v1.6.0 (:3000), nats:2.15.1-alpine (:4222)
+│   ├── core.yml                    # Profile `core`: maximhq/bifrost:v2.3.0 (:8080), agentgateway:v1.6.0 (:3000), nats:2.15.1-alpine (:4222)
 │   ├── bifrost.yaml                # 3-Tier LLM Failover config (OpenCode Go -> OpenRouter -> Local Ollama/vLLM) + Session Affinity
 │   ├── agentgateway.yaml           # CEL RBAC rules & MCP target routing
 │   ├── profile-appsec.yml          # Profile `appsec`: bethington/ghidra-mcp-headless:v6.0.0, radareorg/radare2-mcp:1.8.8, morluto/rea:6.5.0, mdb-mcp:1.2.0
@@ -134,14 +134,17 @@ No `VERDICT: PASS`, no merge. No exceptions.
 │   │   └── pixi.toml               # Conda-forge/PyTorch 2.4/CUDA 12.4/CMake/Ninja/OpenCV deduplicated via rattler hardlinks
 │   └── headless-wayland-desktop/
 │       └── Dockerfile              # Debian trixie-slim + headless Sway + at-spi2-core + ydotool + agent-sh/computer-use-linux:v0.9.4
-├── quadlets/                       # Systemd rootless Podman Quadlets (`StopWhenUnneeded=true` -> 0 MB idle RAM)
-│   ├── heretek-android-kvm.container
-│   ├── heretek-ghidra-mcp.container
-│   └── heretek-blender-mcp.container
+├── images/                         # Pinned local builds for upstreams with no usable published image
+│   └── <service>/Dockerfile        # tagged localhost/heretek/<service>:<version> (see README "Images")
+├── quadlets/                       # Systemd rootless Podman Quadlets, socket-activated (0 MB idle RAM)
+│   ├── heretek-android-kvm.container   (+ -vnc-proxy / -adb-proxy .socket/.service)
+│   ├── heretek-ghidra-mcp.container    (+ -proxy.socket/.service)
+│   └── heretek-blender-mcp.container   (+ -proxy.socket/.service)
 ├── scripts/
 │   ├── heretek-exec.sh             # Sub-5ms local worktree wrapper: bwrap + landrun + mise exec (with /dev/kvm & SELinux support)
 │   ├── heretek-box-ctl.sh          # Operator CLI: `up <profile>`, `down <profile>`, `status`, `verify`, `exec <task-id> <cmd>`
 │   ├── verify-stack.ts             # Deterministic static contract verifier auditing all Compose/Devcontainer/Quadlet/Env files
+│   ├── check-images.ts             # `make images`: resolves every pinned remote image in its registry
 │   └── accept/
 │       ├── wave-1.sh
 │       ├── wave-2.sh
@@ -155,6 +158,12 @@ No `VERDICT: PASS`, no merge. No exceptions.
 ---
 
 ## 2. EXACT MODULE SPECIFICATIONS
+
+> **Image pins (2026-10 remediation):** several image tags below never existed
+> in their registries. The current pins (real published tags, or pinned local
+> builds `localhost/heretek/<service>:<version>` from `images/`) are listed in
+> README "Images" and enforced by `make images`. radare2-mcp runs with `-R`
+> (read-only); `-r` would enable its dangerous run_* tools.
 
 ### 2.1 Wave 1: Root Compose, `core.yml`, `bifrost.yaml`, Fail-Closed Static Verifier
 

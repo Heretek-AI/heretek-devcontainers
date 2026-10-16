@@ -1,39 +1,52 @@
-# quadlets/heretek-android-kvm.container — socket-activated Android emulator (Wave 3)
+# quadlets/heretek-android-kvm.container — on-demand Android emulator (rootless Podman quadlet)
 #
-# Heavy KVM emulator from compose/profile-android.yml, expressed as a rootless
-# Podman systemd quadlet. StopWhenUnneeded=true keeps it at 0 MB idle RAM
-# until socket activation pulls it up. Image and loopback ports mirror the
-# compose profile exactly: budtmo/docker-android:emulator_14.0 on
-# 127.0.0.1:6080 (VNC) and 127.0.0.1:5555 (ADB).
+# Socket-activated through two loopback sockets, one per published port:
+#   heretek-android-kvm-vnc-proxy.socket  127.0.0.1:6080 (noVNC)
+#   heretek-android-kvm-adb-proxy.socket  127.0.0.1:5555 (ADB)
+# The first connection to either starts its systemd-socket-proxyd service,
+# which Requires= this unit, so the emulator is started on demand and proxied
+# to its container-only ports (127.0.0.1:16080 / 127.0.0.1:15555). When both
+# proxies have exited after --exit-idle-time, StopWhenUnneeded=true stops the
+# emulator: 0 MB RAM while idle. No [Install] section on purpose — it must
+# never start at login.
 #
-# Enable + start (user systemd):
+# Image: budtmo/docker-android:emulator_14.0_v3.8.0-p1, the same immutable
+# release tag as compose/profile-android.yml.
+#
+# KVM: AddDevice=/dev/kvm grants only the KVM device node. The container keeps
+# the default container_t SELinux confinement (no SecurityLabelType /
+# SecurityLabelDisable). If an enforcing host denies /dev/kvm access, allow
+# device use for containers rather than disabling labelling:
+#   sudo setsebool -P container_use_devices=true
+#
+# Install (see README "Quadlets"):
+#   cp quadlets/heretek-android-kvm.container ~/.config/containers/systemd/
+#   cp quadlets/heretek-android-kvm-*-proxy.socket quadlets/heretek-android-kvm-*-proxy.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
-#   systemctl --user enable --now heretek-android-kvm.service
-# KVM passthrough comes from the Device= mapping below (a device node grant,
-# not a capability and not a volume mount — no SELinux label rule applies).
+#   systemctl --user enable --now heretek-android-kvm-vnc-proxy.socket heretek-android-kvm-adb-proxy.socket
 
 [Unit]
-Description=Heretek Android KVM emulator (socket-activated, 0 MB idle RAM)
+Description=Heretek Android KVM emulator (socket-activated, stops when idle)
 After=network-online.target
 Wants=network-online.target
 StopWhenUnneeded=true
 
 [Container]
-Image=budtmo/docker-android:emulator_14.0
+Image=budtmo/docker-android:emulator_14.0_v3.8.0-p1
 ContainerName=heretek-android-kvm
 User=1000:1000
-Device=/dev/kvm
-PublishPort=127.0.0.1:6080:6080
-PublishPort=127.0.0.1:5555:5555
+AddDevice=/dev/kvm
+PublishPort=127.0.0.1:16080:6080
+PublishPort=127.0.0.1:15555:5555
 Volume=heretek-android-data:/data:Z
 Environment=EMULATOR_DEVICE=Samsung Galaxy S10
 DropCapability=ALL
 NoNewPrivileges=true
-SecurityLabelType=spc
+HealthCmd=bash -c 'exec 3<>/dev/tcp/127.0.0.1/6080'
+HealthInterval=10s
+HealthStartPeriod=180s
+Notify=healthy
 
 [Service]
 Restart=on-failure
-TimeoutStartSec=300
-
-[Install]
-WantedBy=default.target
+TimeoutStartSec=600

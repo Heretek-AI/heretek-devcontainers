@@ -1,6 +1,6 @@
 {
   "name": "heretek-polyglot-dev",
-  "image": "mcr.microsoft.com/devcontainers/base:1.2.2-bookworm",
+  "image": "mcr.microsoft.com/devcontainers/base:2.2.3-bookworm",
   "remoteUser": "agent",
   "containerUser": "agent",
   "capAdd": [],

@@ -8,9 +8,16 @@
 #
 # `android-kvm` passes through /dev/kvm via `devices:` (a device mapping,
 # not a volume mount — no SELinux label rule applies to it).
+#
+# android-kvm pins the immutable release tag emulator_14.0_v3.8.0-p1 (the bare
+# emulator_14.0 tag is re-pointed on every docker-android release). The two MCP
+# bridges have no usable published HTTP image, so they are pinned local builds
+# (images/<service>/Dockerfile) tagged localhost/heretek/<service>:<version>;
+# `pull_policy: build` keeps compose from pulling the local names. Both speak
+# MCP over streamable HTTP at /mcp (see the `heretek.mcp.*` labels).
 services:
   android-kvm:
-    image: budtmo/docker-android:emulator_14.0
+    image: budtmo/docker-android:emulator_14.0_v3.8.0-p1
     user: "1000:1000"
     restart: unless-stopped
     profiles: ["android", "all"]
@@ -31,7 +38,10 @@ services:
       retries: 3
 
   adb-mcp:
-    image: ghcr.io/iksnerd/adb-mcp:v1.4.0
+    image: localhost/heretek/adb-mcp:0.23.0
+    build:
+      context: ../images/adb-mcp
+    pull_policy: build
     user: "1000:1000"
     restart: unless-stopped
     profiles: ["android", "all"]
@@ -41,6 +51,10 @@ services:
     environment:
       ANDROID_HOST: android-kvm
       ADB_PORT: "5555"
+    labels:
+      heretek.mcp.target: adb
+      heretek.mcp.transport: streamable-http
+      heretek.mcp.path: /mcp
     ports:
       - "127.0.0.1:8770:8770"
     volumes:
@@ -49,23 +63,31 @@ services:
     security_opt:
       - "no-new-privileges:true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8770/healthz"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8770/status', timeout=4)"]
       interval: 30s
       timeout: 5s
       retries: 3
 
   maestro-mcp:
-    image: ghcr.io/mobile-dev-inc/maestro:v1.39.8
+    image: localhost/heretek/maestro-mcp:2.11.0
+    build:
+      context: ../images/maestro-mcp
+    pull_policy: build
     user: "1000:1000"
     restart: unless-stopped
     profiles: ["android", "all"]
     depends_on:
       android-kvm:
         condition: service_started
-    command: ["maestro", "mcp"]
+    # The image entrypoint attaches adb to android-kvm, then serves
+    # `maestro mcp` over streamable HTTP via mcp-proxy.
     environment:
       ANDROID_HOST: android-kvm
       ADB_PORT: "5555"
+    labels:
+      heretek.mcp.target: maestro
+      heretek.mcp.transport: streamable-http
+      heretek.mcp.path: /mcp
     ports:
       - "127.0.0.1:8771:8771"
     volumes:
@@ -74,7 +96,7 @@ services:
     security_opt:
       - "no-new-privileges:true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8771/healthz"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8771/status', timeout=4)"]
       interval: 30s
       timeout: 5s
       retries: 3

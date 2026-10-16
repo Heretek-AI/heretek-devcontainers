@@ -16,18 +16,33 @@
  *                            or pentagi (case-insensitive).
  *   ENV_PLACEHOLDER_LEAK   — a real `.env` containing a `CHANGEME_` token.
  *                            (`.env.example` is the template and MUST keep them.)
+ *   SELINUX_CONFINED       — a quadlet that opts out of SELinux confinement
+ *                            (`SecurityLabelType=spc_t`/`spc`, `SecurityLabelDisable=true`)
+ *                            or runs privileged.
+ *   QUADLET_SOCKET_ACTIVATION — a quadlet container that can start on its own
+ *                            (`[Install]`/`WantedBy=`, no `StopWhenUnneeded=true`) or
+ *                            lacks a loopback `.socket` + systemd-socket-proxyd
+ *                            `.service` pair that Requires=/After= it and exits idle.
  *
- * Scanned roots (each skipped gracefully when absent — Wave 1 has no
- * devcontainers/quadlets yet, Wave 2/3 add them):
- *   docker-compose.yml, compose/*.yml,
- *   devcontainers slash-star .devcontainer.json, quadlets/*.container,
+ * Local builds: a compose service with `build:` must tag its image as
+ * `localhost/<name>:<version>` (NO_FLOATING_TAGS); Dockerfile `FROM` and
+ * `COPY --from=` images must carry an explicit version tag.
+ *
+ * Scanned roots (each skipped gracefully when absent):
+ *   docker-compose.yml, compose/*.yml (+ compose/*.yaml, *.json generic rules),
+ *   devcontainers/** (.json + Dockerfile), images/** /Dockerfile,
+ *   quadlets/*.container, quadlets/*.socket, quadlets/*.service,
  *   .env (placeholder check only).
+ *
+ * Usage: bun run scripts/verify-stack.ts [--root <dir>]
+ *   --root defaults to the repository root; tests point it at fixture trees.
  *
  * Zero dependencies beyond the Bun/Node standard library.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
+import { dockerfileImages, isLocalImage, isPinned, parseImageRef } from "./lib/image-ref";
 
 interface Violation {
   file: string;
@@ -36,7 +51,30 @@ interface Violation {
   message: string;
 }
 
-const REPO_ROOT = join(import.meta.dir, "..");
+function parseRoot(argv: string[]): string {
+  let root = join(import.meta.dir, "..");
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--root") {
+      const value = argv[i + 1];
+      if (!value) {
+        console.error("verify-stack: --root requires a directory");
+        process.exit(2);
+      }
+      root = resolve(value);
+      i += 1;
+    } else {
+      console.error(`verify-stack: unknown argument: ${argv[i]}`);
+      process.exit(2);
+    }
+  }
+  if (!existsSync(root) || !statSync(root).isDirectory()) {
+    console.error(`verify-stack: --root is not a directory: ${root}`);
+    process.exit(2);
+  }
+  return root;
+}
+
+const REPO_ROOT = parseRoot(process.argv.slice(2));
 const violations: Violation[] = [];
 let filesScanned = 0;
 
@@ -83,8 +121,8 @@ function unquote(value: string): string {
 
 // ---------------------------------------------------------------------------
 // Compose-file checks (docker-compose.yml + compose/*.yml files that declare
-// `services:`). Non-service YAML (bifrost.yaml, agentgateway.yaml) still gets
-// the generic substring rules via checkGenericContent.
+// `services:`). Non-service configs (bifrost.config.json, agentgateway.yaml)
+// still get the generic substring rules via checkGenericContent.
 // ---------------------------------------------------------------------------
 
 const BANNED_IMAGE_TOKENS = ["firecrawl", "rfingadam", "bytebot", "0xflux", "pentagi"];
@@ -288,6 +326,32 @@ function checkSelinuxLabels(display: string, block: ServiceBlock): void {
   }
 }
 
+function checkLocalBuild(display: string, block: ServiceBlock): void {
+  const build = block.lines.find((l) => /^ {4}build\s*:/.test(stripComment(l.text)));
+  if (!build) return;
+  const imageLine = block.lines.find((l) => /^ {4}image\s*:/.test(stripComment(l.text)));
+  if (!imageLine) {
+    fail(display, block.startLine, "NO_FLOATING_TAGS", `service "${block.name}" builds an image without a versioned image: tag`);
+    return;
+  }
+  const image = unquote(stripComment(imageLine.text).replace(/^\s*image\s*:/, ""));
+  let local = false;
+  try {
+    const ref = parseImageRef(image);
+    local = isLocalImage(ref) && isPinned(ref) && ref.digest === null;
+  } catch {
+    local = false;
+  }
+  if (!local) {
+    fail(
+      display,
+      imageLine.lineNo,
+      "NO_FLOATING_TAGS",
+      `service "${block.name}" builds locally; its image must be localhost/<name>:<version>, got: ${image}`,
+    );
+  }
+}
+
 function checkComposeFile(path: string): void {
   const display = repoRel(path);
   const lines = readLines(path);
@@ -299,6 +363,24 @@ function checkComposeFile(path: string): void {
     checkLoopbackPorts(display, block);
     checkHardenedCaps(display, block);
     checkSelinuxLabels(display, block);
+    checkLocalBuild(display, block);
+  }
+}
+
+function checkDockerfile(path: string): void {
+  const display = repoRel(path);
+  filesScanned += 1;
+  checkGenericContent(path, readLines(path));
+  for (const found of dockerfileImages(path, REPO_ROOT)) {
+    let pinned = false;
+    try {
+      pinned = isPinned(parseImageRef(found.ref));
+    } catch {
+      pinned = false;
+    }
+    if (!pinned) {
+      fail(display, found.line, "NO_FLOATING_TAGS", `Dockerfile base image not pinned to a version: ${found.ref}`);
+    }
   }
 }
 
@@ -377,29 +459,163 @@ function checkDevcontainerFile(path: string): void {
   checkImage(parsed);
 }
 
-function checkQuadletFile(path: string): void {
-  const display = repoRel(path);
-  const lines = readLines(path);
-  filesScanned += 1;
-  lines.forEach((raw, idx) => {
-    const lineNo = idx + 1;
-    const code = stripComment(raw).trim();
-    const imageMatch = /^Image\s*=\s*(.+?)\s*$/.exec(code);
-    if (imageMatch) {
-      const image = imageMatch[1].trim();
-      const tagPart = image.slice(image.lastIndexOf("/") + 1);
-      if (!tagPart.includes(":") || tagPart.endsWith(":latest")) {
-        fail(display, lineNo, "NO_FLOATING_TAGS", `quadlet image not pinned: ${image}`);
-      }
-      if (BANNED_IMAGE_TOKENS.some((token) => image.toLowerCase().includes(token))) {
-        fail(display, lineNo, "NO_AGPL_IN_DEV_OR_GAME", `banned AGPL/root-escape image: ${image}`);
-      }
+interface UnitEntry {
+  section: string;
+  key: string;
+  value: string;
+  lineNo: number;
+}
+
+function parseUnit(path: string): UnitEntry[] {
+  const entries: UnitEntry[] = [];
+  let section = "";
+  readLines(path).forEach((raw, idx) => {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#") || line.startsWith(";")) return;
+    const head = /^\[([^\]]+)\]$/.exec(line);
+    if (head) {
+      section = head[1];
+      return;
     }
+    const kv = /^([A-Za-z0-9]+)\s*=\s*(.*)$/.exec(line);
+    if (kv) entries.push({ section, key: kv[1], value: kv[2].trim(), lineNo: idx + 1 });
+  });
+  return entries;
+}
+
+function unitValues(entries: UnitEntry[], key: string): string[] {
+  return entries
+    .filter((e) => e.key === key)
+    .flatMap((e) => e.value.split(/\s+/))
+    .filter((v) => v !== "");
+}
+
+function checkUnitGeneric(path: string): void {
+  const display = repoRel(path);
+  readLines(path).forEach((raw, idx) => {
     const lowered = raw.toLowerCase();
     if (lowered.includes("docker.sock") || lowered.includes("podman.sock")) {
-      fail(display, lineNo, "NO_DOCKER_SOCK", `socket reference forbidden: ${raw.trim()}`);
+      fail(display, idx + 1, "NO_DOCKER_SOCK", `socket reference forbidden: ${raw.trim()}`);
     }
   });
+}
+
+function checkQuadletFile(path: string, sockets: string[], services: string[]): void {
+  const display = repoRel(path);
+  filesScanned += 1;
+  checkUnitGeneric(path);
+  const entries = parseUnit(path);
+  const unitName = `${basename(path, ".container")}.service`;
+  for (const e of entries) {
+    if (e.key === "Image") {
+      const image = e.value;
+      if (!/\.(build|image)$/.test(image)) {
+        let pinned = false;
+        try {
+          pinned = isPinned(parseImageRef(image));
+        } catch {
+          pinned = false;
+        }
+        if (!pinned) fail(display, e.lineNo, "NO_FLOATING_TAGS", `quadlet image not pinned: ${image}`);
+      }
+      if (BANNED_IMAGE_TOKENS.some((token) => image.toLowerCase().includes(token))) {
+        fail(display, e.lineNo, "NO_AGPL_IN_DEV_OR_GAME", `banned AGPL/root-escape image: ${image}`);
+      }
+    }
+    if (e.key === "PublishPort" && !e.value.startsWith("127.0.0.1:")) {
+      fail(display, e.lineNo, "LOOPBACK_PORTS_ONLY", `quadlet PublishPort must bind 127.0.0.1, got: ${e.value}`);
+    }
+    if (e.key === "Volume") {
+      const host = e.value.split(":")[0];
+      const isBind = host.startsWith("/") || host.startsWith("./") || host.startsWith("%");
+      if (isBind && !/:([^:]*,)?[zZ](,|$)/.test(e.value)) {
+        fail(display, e.lineNo, "SELINUX_VOLUME_LABELS", `quadlet bind mount missing :z/:Z label: ${e.value}`);
+      }
+    }
+    if (e.key === "SecurityLabelType" && /^spc(_t)?$/.test(e.value)) {
+      fail(display, e.lineNo, "SELINUX_CONFINED", `SecurityLabelType=${e.value} disables SELinux confinement`);
+    }
+    if ((e.key === "SecurityLabelDisable" || e.key === "Privileged") && /^(true|yes|1)$/i.test(e.value)) {
+      fail(display, e.lineNo, "SELINUX_CONFINED", `${e.key}=${e.value} disables container confinement`);
+    }
+    if (e.key === "PodmanArgs" && /--privileged|label=disable|label=type:spc_t/.test(e.value)) {
+      fail(display, e.lineNo, "SELINUX_CONFINED", `PodmanArgs opts out of confinement: ${e.value}`);
+    }
+    if (e.section === "Install") {
+      fail(
+        display,
+        e.lineNo,
+        "QUADLET_SOCKET_ACTIVATION",
+        `[Install] ${e.key}= starts the container on its own; only its .socket may be enabled`,
+      );
+    }
+  }
+  if (!unitValues(entries, "DropCapability").includes("ALL")) {
+    fail(display, 1, "HARDENED_CAPS", "quadlet missing DropCapability=ALL");
+  }
+  if (!entries.some((e) => e.key === "NoNewPrivileges" && /^(true|yes|1)$/i.test(e.value))) {
+    fail(display, 1, "HARDENED_CAPS", "quadlet missing NoNewPrivileges=true");
+  }
+  if (!entries.some((e) => e.section === "Unit" && e.key === "StopWhenUnneeded" && /^(true|yes|1)$/i.test(e.value))) {
+    fail(display, 1, "QUADLET_SOCKET_ACTIVATION", "quadlet missing [Unit] StopWhenUnneeded=true");
+  }
+  // At least one proxy .service (paired with a .socket of the same name) must
+  // Requires= and After= this container unit.
+  const pulledBy = services.filter((svc) => {
+    const svcEntries = parseUnit(svc);
+    return (
+      unitValues(svcEntries, "Requires").includes(unitName) &&
+      unitValues(svcEntries, "After").includes(unitName) &&
+      sockets.some((sock) => basename(sock, ".socket") === basename(svc, ".service"))
+    );
+  });
+  if (pulledBy.length === 0) {
+    fail(
+      display,
+      1,
+      "QUADLET_SOCKET_ACTIVATION",
+      `no quadlets/*.socket + proxy .service pair Requires=/After= ${unitName} (container is never socket-activated)`,
+    );
+  }
+}
+
+function checkSocketFile(path: string, services: string[]): void {
+  const display = repoRel(path);
+  filesScanned += 1;
+  checkUnitGeneric(path);
+  const entries = parseUnit(path);
+  const listens = entries.filter((e) => e.section === "Socket" && /^Listen(Stream|Datagram)$/.test(e.key));
+  if (listens.length === 0) {
+    fail(display, 1, "QUADLET_SOCKET_ACTIVATION", "socket unit has no ListenStream=");
+  }
+  for (const e of listens) {
+    if (!e.value.startsWith("127.0.0.1:")) {
+      fail(display, e.lineNo, "LOOPBACK_PORTS_ONLY", `socket must listen on 127.0.0.1:<port>, got: ${e.value}`);
+    }
+  }
+  const twin = `${basename(path, ".socket")}.service`;
+  if (!services.some((svc) => basename(svc) === twin)) {
+    fail(display, 1, "QUADLET_SOCKET_ACTIVATION", `socket has no matching ${twin} proxy unit`);
+  }
+}
+
+function checkProxyServiceFile(path: string): void {
+  const display = repoRel(path);
+  filesScanned += 1;
+  checkUnitGeneric(path);
+  const entries = parseUnit(path);
+  const exec = entries.find((e) => e.section === "Service" && e.key === "ExecStart");
+  if (!exec || !/systemd-socket-proxyd\s/.test(exec.value)) {
+    fail(display, exec?.lineNo ?? 1, "QUADLET_SOCKET_ACTIVATION", "proxy unit must ExecStart systemd-socket-proxyd");
+    return;
+  }
+  if (!/--exit-idle-time=\S+/.test(exec.value)) {
+    fail(display, exec.lineNo, "QUADLET_SOCKET_ACTIVATION", "systemd-socket-proxyd needs --exit-idle-time= so the container can stop when idle");
+  }
+  const target = exec.value.trim().split(/\s+/).pop() ?? "";
+  if (!target.startsWith("127.0.0.1:")) {
+    fail(display, exec.lineNo, "LOOPBACK_PORTS_ONLY", `proxy must forward to 127.0.0.1:<port>, got: ${target}`);
+  }
 }
 
 function checkRealEnv(path: string): void {
@@ -435,10 +651,11 @@ function main(): void {
   if (existsSync(rootCompose)) composeFiles.push(rootCompose);
   collectFiles(join(REPO_ROOT, "compose"), ".yml", composeFiles);
 
-  // Non-service YAML configs (bifrost.yaml, agentgateway.yaml) get generic
+  // Non-service configs (agentgateway.yaml, bifrost.config.json) get generic
   // substring rules only — they declare no services/images/ports.
   const genericYaml: string[] = [];
   collectFiles(join(REPO_ROOT, "compose"), ".yaml", genericYaml);
+  collectFiles(join(REPO_ROOT, "compose"), ".json", genericYaml);
 
   const devcontainers: string[] = [];
   collectFiles(join(REPO_ROOT, "devcontainers"), ".devcontainer.json", devcontainers);
@@ -451,6 +668,14 @@ function main(): void {
 
   const quadlets: string[] = [];
   collectFiles(join(REPO_ROOT, "quadlets"), ".container", quadlets);
+  const sockets: string[] = [];
+  collectFiles(join(REPO_ROOT, "quadlets"), ".socket", sockets);
+  const proxyServices: string[] = [];
+  collectFiles(join(REPO_ROOT, "quadlets"), ".service", proxyServices);
+
+  const dockerfiles: string[] = [];
+  collectFiles(join(REPO_ROOT, "images"), "Dockerfile", dockerfiles);
+  collectFiles(join(REPO_ROOT, "devcontainers"), "Dockerfile", dockerfiles);
 
   for (const file of composeFiles.sort()) checkComposeFile(file);
   for (const file of genericYaml.sort()) {
@@ -458,7 +683,10 @@ function main(): void {
     checkGenericContent(file, readLines(file));
   }
   for (const file of devcontainers.sort()) checkDevcontainerFile(file);
-  for (const file of quadlets.sort()) checkQuadletFile(file);
+  for (const file of dockerfiles.sort()) checkDockerfile(file);
+  for (const file of quadlets.sort()) checkQuadletFile(file, sockets, proxyServices);
+  for (const file of sockets.sort()) checkSocketFile(file, proxyServices);
+  for (const file of proxyServices.sort()) checkProxyServiceFile(file);
   checkRealEnv(join(REPO_ROOT, ".env"));
 
   if (violations.length > 0) {

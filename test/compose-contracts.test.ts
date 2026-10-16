@@ -93,6 +93,15 @@ function extractPortEntries(text: string): string[] {
 }
 
 describe("compose contracts (real files on disk)", () => {
+  test("every compose and config YAML file parses", () => {
+    const yamlFiles = [...composeFiles(), join(REPO_ROOT, "compose/agentgateway.yaml")];
+    for (const file of yamlFiles) {
+      expect(() => Bun.YAML.parse(readText(file))).not.toThrow();
+    }
+    const core = Bun.YAML.parse(readText(join(REPO_ROOT, "compose/core.yml"))) as { services: Record<string, unknown> };
+    expect(Object.keys(core.services).sort()).toEqual(["agentgateway", "bifrost", "nats"]);
+  });
+
   test("at least root compose + core.yml are scanned", () => {
     const files = composeFiles();
     expect(files.length).toBeGreaterThanOrEqual(2);
@@ -115,9 +124,9 @@ describe("compose contracts (real files on disk)", () => {
     expect(images.length).toBeGreaterThan(0);
   });
 
-  test("core images are pinned to the exact spec versions", () => {
+  test("core images are pinned to existing release tags", () => {
     const core = readText(join(REPO_ROOT, "compose/core.yml"));
-    expect(core).toContain("ghcr.io/maximhq/bifrost:v1.0.0");
+    expect(core).toContain("ghcr.io/maximhq/bifrost:v2.3.0");
     expect(core).toContain("ghcr.io/agentgateway/agentgateway:v1.6.0");
     expect(core).toContain("nats:2.15.1-alpine");
   });
@@ -253,18 +262,18 @@ describe("wave 2 specialist profiles (real files on disk)", () => {
   };
 
   const EXPECTED_IMAGES: Record<string, string> = {
-    "ghidra-mcp": "bethington/ghidra-mcp-headless:v6.0.0",
-    "radare2-mcp": "ghcr.io/radareorg/radare2-mcp:1.8.8",
-    "rea-mcp": "ghcr.io/morluto/rea:6.5.0",
-    "mdb-mcp": "ghcr.io/smadi0x86/mdb-mcp:1.2.0",
-    "android-kvm": "budtmo/docker-android:emulator_14.0",
-    "adb-mcp": "ghcr.io/iksnerd/adb-mcp:v1.4.0",
-    "maestro-mcp": "ghcr.io/mobile-dev-inc/maestro:v1.39.8",
-    "godot-mcp": "ghcr.io/tugcantopaloglu/godot-mcp:v3.1.0",
-    "blender-mcp": "ghcr.io/sandraschi/blender-mcp:v1.2.0",
-    searxng: "searxng/searxng:2026.10.14",
+    "ghidra-mcp": "localhost/heretek/ghidra-mcp:6.0.0",
+    "radare2-mcp": "localhost/heretek/radare2-mcp:1.9.0",
+    "rea-mcp": "localhost/heretek/rea-mcp:6.5.0",
+    "mdb-mcp": "localhost/heretek/mdb-mcp:0.2.0-5d03b25",
+    "android-kvm": "budtmo/docker-android:emulator_14.0_v3.8.0-p1",
+    "adb-mcp": "localhost/heretek/adb-mcp:0.23.0",
+    "maestro-mcp": "localhost/heretek/maestro-mcp:2.11.0",
+    "godot-mcp": "localhost/heretek/godot-mcp:3.1.0",
+    "blender-mcp": "localhost/heretek/blender-mcp:0.11.1",
+    searxng: "searxng/searxng:2026.10.16-0ce72dd2c",
     crawl4ai: "unclecode/crawl4ai:0.9.5",
-    "computer-use-linux": "ghcr.io/agent-sh/computer-use-linux:v0.9.4",
+    "computer-use-linux": "localhost/heretek/computer-use-linux:0.7.17",
   };
 
   const EXPECTED_PORTS: Record<string, string[]> = {
@@ -297,7 +306,7 @@ describe("wave 2 specialist profiles (real files on disk)", () => {
     }
   });
 
-  test("every wave-2 service image is pinned to its exact spec version", () => {
+  test("every wave-2 service image is pinned to an existing tag or versioned local build", () => {
     let total = 0;
     for (const rel of PROFILE_FILES) {
       const text = readText(join(REPO_ROOT, rel));
@@ -397,9 +406,26 @@ describe("wave 2 specialist profiles (real files on disk)", () => {
     expect(appsec).toContain("${GHIDRA_MCP_AUTH_TOKEN:");
   });
 
-  test("radare2-mcp runs its spec read-only command", () => {
+  test("radare2-mcp runs read-only (-R) and sandboxed, never with the run_* tools (-r)", () => {
     const appsec = readText(join(REPO_ROOT, "compose/profile-appsec.yml"));
-    expect(appsec).toContain('command: ["r2mcp", "-H", "0.0.0.0:8765", "-r"]');
+    expect(appsec).toContain('command: ["r2mcp", "-H", "0.0.0.0:8765", "-R", "-s", "/data"]');
+    expect(appsec).not.toMatch(/"-r"/);
+  });
+
+  test("every local-build service builds from images/<service> with pull_policy: build", () => {
+    for (const rel of PROFILE_FILES) {
+      const services = (Bun.YAML.parse(readText(join(REPO_ROOT, rel))) as { services: Record<string, Record<string, unknown>> }).services;
+      for (const [name, def] of Object.entries(services)) {
+        const image = def.image as string;
+        if (!image.startsWith("localhost/")) {
+          expect(def.build).toBeUndefined();
+          continue;
+        }
+        expect((def.build as { context: string }).context).toBe(`../images/${name}`);
+        expect(def.pull_policy).toBe("build");
+        expect(existsSync(join(REPO_ROOT, "images", name, "Dockerfile"))).toBe(true);
+      }
+    }
   });
 
   test("android-kvm passes through /dev/kvm", () => {
@@ -410,14 +436,14 @@ describe("wave 2 specialist profiles (real files on disk)", () => {
   test("adb-mcp targets android-kvm:5555 and maestro-mcp runs its spec command", () => {
     const android = readText(join(REPO_ROOT, "compose/profile-android.yml"));
     expect(android).toContain("ANDROID_HOST: android-kvm");
-    expect(android).toContain('command: ["maestro", "mcp"]');
+    expect(readText(join(REPO_ROOT, "images/maestro-mcp/start.sh"))).toContain("maestro mcp");
     expect(android).toContain("depends_on:");
   });
 
   test("godot-mcp runs headless and blender-mcp runs background FastMCP", () => {
     const game = readText(join(REPO_ROOT, "compose/profile-game.yml"));
     expect(game).toContain("GODOT_HEADLESS");
-    expect(game).toContain('command: ["blender", "--background"]');
+    expect(readText(join(REPO_ROOT, "images/blender-mcp/Dockerfile"))).toContain("BLENDER_EXECUTABLE=/opt/blender/blender");
   });
 
   test("crawl4ai reserves 1g shm and searxng mandates its secret", () => {

@@ -9,14 +9,32 @@
 # NOTE: `mdb-mcp` carries the SOLE documented capability exception in this
 # repo — a narrow SYS_PTRACE grant required for debugger attachment.
 # It still drops all other capabilities and keeps no-new-privileges.
+#
+# None of these upstreams publishes a usable container image, so each service
+# is a pinned local build (images/<service>/Dockerfile) tagged
+# localhost/heretek/<service>:<upstream version>. `pull_policy: build` keeps
+# compose from ever trying to pull the local name from a registry.
+# Every service speaks MCP over streamable HTTP at /mcp on its container port;
+# the `heretek.mcp.*` labels are what compose/agentgateway.yaml routes to
+# (enforced by test/agentgateway-config.test.ts).
 services:
   ghidra-mcp:
-    image: bethington/ghidra-mcp-headless:v6.0.0
+    image: localhost/heretek/ghidra-mcp:6.0.0
+    build:
+      context: ../images/ghidra-mcp
+    pull_policy: build
     user: "1000:1000"
     restart: unless-stopped
     profiles: ["appsec", "all"]
     environment:
       GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:?GHIDRA_MCP_AUTH_TOKEN is mandatory}
+      # The bridge keeps DNS-rebinding protection on; allow the compose DNS
+      # name the agent gateway uses as its Host header, plus host loopback.
+      GHIDRA_MCP_ALLOWED_HOSTS: ghidra-mcp,localhost,127.0.0.1
+    labels:
+      heretek.mcp.target: ghidra
+      heretek.mcp.transport: streamable-http
+      heretek.mcp.path: /mcp
     ports:
       - "127.0.0.1:8089:8089"
     volumes:
@@ -25,19 +43,29 @@ services:
     security_opt:
       - "no-new-privileges:true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8089/healthz"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8089"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 120s
 
   radare2-mcp:
-    image: ghcr.io/radareorg/radare2-mcp:1.8.8
+    image: localhost/heretek/radare2-mcp:1.9.0
+    build:
+      context: ../images/radare2-mcp
+    pull_policy: build
     user: "1000:1000"
     restart: unless-stopped
     profiles: ["appsec", "all"]
     # Container-internal listen address (NOT a published host port — the
-    # published port below is loopback-only). `-r` forces read-only mode.
-    command: ["r2mcp", "-H", "0.0.0.0:8765", "-r"]
+    # published port below is loopback-only). `-R` exposes only the read-only
+    # tool set (`-r` would ENABLE the dangerous run_* tools); `-s /data`
+    # sandboxes file access to the data volume.
+    command: ["r2mcp", "-H", "0.0.0.0:8765", "-R", "-s", "/data"]
+    labels:
+      heretek.mcp.target: radare2
+      heretek.mcp.transport: streamable-http
+      heretek.mcp.path: /mcp
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
@@ -46,16 +74,23 @@ services:
     security_opt:
       - "no-new-privileges:true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8765/healthz"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8765"]
       interval: 30s
       timeout: 5s
       retries: 3
 
   rea-mcp:
-    image: ghcr.io/morluto/rea:6.5.0
+    image: localhost/heretek/rea-mcp:6.5.0
+    build:
+      context: ../images/rea-mcp
+    pull_policy: build
     user: "1000:1000"
     restart: unless-stopped
     profiles: ["appsec", "all"]
+    labels:
+      heretek.mcp.target: rea
+      heretek.mcp.transport: streamable-http
+      heretek.mcp.path: /mcp
     ports:
       - "127.0.0.1:8766:8766"
     volumes:
@@ -64,16 +99,24 @@ services:
     security_opt:
       - "no-new-privileges:true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8766/healthz"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/status', timeout=4)"]
       interval: 30s
       timeout: 5s
       retries: 3
 
   mdb-mcp:
-    image: ghcr.io/smadi0x86/mdb-mcp:1.2.0
+    # Upstream has no release tag; the build pins commit 5d03b25 (version 0.2.0).
+    image: localhost/heretek/mdb-mcp:0.2.0-5d03b25
+    build:
+      context: ../images/mdb-mcp
+    pull_policy: build
     user: "1000:1000"
     restart: unless-stopped
     profiles: ["appsec", "all"]
+    labels:
+      heretek.mcp.target: mdb
+      heretek.mcp.transport: streamable-http
+      heretek.mcp.path: /mcp
     ports:
       - "127.0.0.1:8767:8767"
     volumes:
@@ -84,7 +127,7 @@ services:
     security_opt:
       - "no-new-privileges:true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8767/healthz"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8767/status', timeout=4)"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -1,0 +1,13 @@
+# quadlets/heretek-android-kvm-vnc-proxy.socket — noVNC activation socket for heretek-android-kvm
+#
+# Listens on the loopback-only port compose also uses (127.0.0.1:6080) and
+# activates heretek-android-kvm-vnc-proxy.service on the first connection.
+
+[Unit]
+Description=Heretek Android KVM noVNC activation socket (127.0.0.1:6080)
+
+[Socket]
+ListenStream=127.0.0.1:6080
+
+[Install]
+WantedBy=sockets.target
